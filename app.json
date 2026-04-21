@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Poop Finder",
+    "slug": "PoopFinder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#7C3AED"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.poopfinder.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Poop Finder needs your location to find nearby restrooms.",
+        "NSLocationAlwaysUsageDescription": "Poop Finder needs your location to find nearby restrooms.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.poopfinder.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f8f4ff"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Poop Finder needs your location to find nearby restrooms."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "43a69e70-306e-47a0-a55f-83b3fbc809aa"
+      }
+    },
+    "owner": "dkamlesh90"
+  }
+}

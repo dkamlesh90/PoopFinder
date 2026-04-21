@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9333EA"/>
+      <stop offset="100%" stop-color="#3B0764"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="rgba(0,0,0,0.28)"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Subtle top glow -->
+  <ellipse cx="512" cy="-60" rx="520" ry="340" fill="rgba(255,255,255,0.08)"/>
+
+  <g filter="url(#shadow)">
+    <!-- Tank lid (slightly wider than tank body) -->
+    <rect x="327" y="158" width="370" height="52" rx="26" fill="white"/>
+
+    <!-- Tank body -->
+    <rect x="352" y="200" width="320" height="188" rx="28" fill="white"/>
+
+    <!-- Flush lever -->
+    <rect x="637" y="257" width="52" height="20" rx="10" fill="#7C3AED" opacity="0.55"/>
+
+    <!-- Seat rim -->
+    <rect x="242" y="374" width="540" height="86" rx="43" fill="white"/>
+
+    <!-- Bowl (U-shape) -->
+    <path d="M 267 448 L 757 448 C 757 848 267 848 267 448 Z" fill="white"/>
+
+    <!-- Base -->
+    <rect x="392" y="816" width="240" height="46" rx="14" fill="white"/>
+  </g>
+
+  <!-- Water shimmer in bowl (non-shadowed, sits inside bowl) -->
+  <ellipse cx="512" cy="718" rx="165" ry="56" fill="#7C3AED" opacity="0.13"/>
+</svg>
