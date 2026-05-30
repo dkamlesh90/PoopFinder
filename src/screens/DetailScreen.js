@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchFoursquareTips, fetchOSMNotesNear } from '../services/bathroomService';
+import AdBanner from '../components/AdBanner';
 
 const SOURCE_LABELS = {
   osm: 'OpenStreetMap',
@@ -123,6 +124,8 @@ export default function DetailScreen({ bathroom, onBack }) {
           <Text style={styles.sectionTitle} accessibilityRole="header">Poop Score</Text>
           <PoopScore bathroom={bathroom} />
         </View>
+
+        <AdBanner />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Community Reviews</Text>

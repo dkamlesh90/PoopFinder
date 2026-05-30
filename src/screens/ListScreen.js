@@ -10,6 +10,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BathroomCard from '../components/BathroomCard';
+import AdBanner from '../components/AdBanner';
+
+const AD_INTERVAL = 5;
 
 export default function ListScreen({ bathrooms, loading, onSelectBathroom }) {
   const [search, setSearch] = useState('');
@@ -21,9 +24,22 @@ export default function ListScreen({ bathrooms, loading, onSelectBathroom }) {
       : bathrooms;
   }, [bathrooms, search]);
 
-  const renderItem = useCallback(({ item }) => (
-    <BathroomCard bathroom={item} onPress={() => onSelectBathroom(item)} />
-  ), [onSelectBathroom]);
+  // Weave an ad placeholder after every AD_INTERVAL bathroom items
+  const listData = useMemo(() => {
+    const result = [];
+    filtered.forEach((item, index) => {
+      result.push(item);
+      if ((index + 1) % AD_INTERVAL === 0) {
+        result.push({ _isAd: true, id: `__ad_${index}` });
+      }
+    });
+    return result;
+  }, [filtered]);
+
+  const renderItem = useCallback(({ item }) => {
+    if (item._isAd) return <AdBanner />;
+    return <BathroomCard bathroom={item} onPress={() => onSelectBathroom(item)} />;
+  }, [onSelectBathroom]);
 
   const keyExtractor = useCallback((item) => item.id, []);
 
@@ -59,7 +75,7 @@ export default function ListScreen({ bathrooms, loading, onSelectBathroom }) {
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={listData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
