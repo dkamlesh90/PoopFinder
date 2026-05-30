@@ -20,6 +20,7 @@ import DetailScreen from './src/screens/DetailScreen';
 import TinderScreen from './src/screens/TinderScreen';
 import SplashScreen from './src/screens/SplashScreen';
 import FilterModal, { DEFAULT_FILTERS, countActiveFilters, applyFilters } from './src/components/FilterModal';
+import LocationPickerModal from './src/components/LocationPickerModal';
 import { fetchNearbyBathrooms, loadCachedBathrooms, loadStaleCachedBathrooms, getMockBathrooms } from './src/services/bathroomService';
 
 ExpoSplashScreen.preventAutoHideAsync();
@@ -42,6 +43,8 @@ export default function App() {
   const [locationError, setLocationError]       = useState(null);
   const [filters, setFilters]                   = useState(DEFAULT_FILTERS);
   const [filterVisible, setFilterVisible]       = useState(false);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [locationName, setLocationName]         = useState(null);
   // Track the radius (metres) of the last completed fetch so we only re-fetch
   // when the user selects a distance larger than what we already have.
   const lastFetchedRadiusRef = useRef(DEFAULT_FILTERS.maxDistanceMi * 1609.344);
@@ -98,6 +101,22 @@ export default function App() {
       setLocationError('Could not get your location. Please try again.');
     }
   }, [loadBathrooms]);
+
+  const handlePickLocation = useCallback(({ latitude, longitude, name }) => {
+    const coords = { latitude, longitude };
+    setLocation(coords);
+    setLocationName(name);
+    setLocationPickerVisible(false);
+    lastFetchedRadiusRef.current = 0; // force fresh fetch at new location
+    loadBathrooms(coords, filters.maxDistanceMi * 1609.344);
+  }, [loadBathrooms, filters.maxDistanceMi]);
+
+  const handleUseGPS = useCallback(() => {
+    setLocationPickerVisible(false);
+    setLocationName(null);
+    lastFetchedRadiusRef.current = 0;
+    requestLocation();
+  }, [requestLocation]);
 
   useEffect(() => {
     ExpoSplashScreen.hideAsync();
@@ -156,19 +175,44 @@ export default function App() {
       ) : (
         <View style={styles.flex}>
           <View style={styles.appHeader}>
-            <View style={styles.logoRow}>
+            <TouchableOpacity
+              style={styles.logoRow}
+              onPress={() => setLocationPickerVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Change location. Currently ${locationName ?? 'using GPS'}`}
+            >
               <View style={styles.logoMark}>
                 <Text style={styles.logoMarkEmoji}>🚽</Text>
               </View>
-              <View>
+              <View style={styles.logoText}>
                 <Text style={styles.appTitle} accessibilityRole="header">Poop Finder</Text>
-                <Text style={styles.appSubtitle}>
-                  {fromMock ? '📱 Offline — showing demo data' : fromCache ? '📦 Showing cached results' : 'Find the best nearby restroom'}
-                </Text>
+                <View style={styles.subtitleRow}>
+                  <Ionicons name={locationName ? 'location' : 'navigate'} size={11} color="#7C3AED" />
+                  <Text style={styles.appSubtitle} numberOfLines={1}>
+                    {locationName
+                      ? locationName
+                      : fromMock
+                      ? '📱 Offline — demo data'
+                      : fromCache
+                      ? '📦 Cached results'
+                      : 'GPS — tap to change'}
+                  </Text>
+                </View>
               </View>
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.headerActions}>
+              {/* Location picker button */}
+              <TouchableOpacity
+                onPress={() => setLocationPickerVisible(true)}
+                style={[styles.locationBtn, locationName && styles.locationBtnActive]}
+                accessibilityRole="button"
+                accessibilityLabel="Change search location"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="location-outline" size={22} color={locationName ? '#fff' : '#7C3AED'} />
+              </TouchableOpacity>
+
               {/* Panic button */}
               <TouchableOpacity
                 onPress={handlePanic}
@@ -261,6 +305,14 @@ export default function App() {
         </View>
       )}
 
+      <LocationPickerModal
+        visible={locationPickerVisible}
+        currentName={locationName}
+        onSelect={handlePickLocation}
+        onUseGPS={handleUseGPS}
+        onClose={() => setLocationPickerVisible(false)}
+      />
+
       <FilterModal
         visible={filterVisible}
         filters={filters}
@@ -294,7 +346,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0e8ff',
   },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  logoText: { flex: 1, minWidth: 0 },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
   logoMark: {
     width: 40, height: 40, borderRadius: 12,
     backgroundColor: '#7C3AED',
@@ -302,7 +356,15 @@ const styles = StyleSheet.create({
   },
   logoMarkEmoji: { fontSize: 20 },
   appTitle: { fontSize: 22, fontWeight: '900', color: '#222', letterSpacing: -0.5 },
-  appSubtitle: { fontSize: 12, color: '#7C3AED', fontWeight: '500', marginTop: 1 },
+  appSubtitle: { fontSize: 12, color: '#7C3AED', fontWeight: '500', flexShrink: 1 },
+  locationBtn: {
+    padding: 10, minWidth: 44, minHeight: 44,
+    justifyContent: 'center', alignItems: 'center',
+    borderRadius: 12,
+  },
+  locationBtnActive: {
+    backgroundColor: '#7C3AED',
+  },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   panicBtn: {
     width: 44, height: 44,

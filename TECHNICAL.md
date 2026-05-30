@@ -18,51 +18,60 @@
 14. [Testing](#14-testing)
 15. [Platform Specifics](#15-platform-specifics)
 16. [Asset Pipeline](#16-asset-pipeline)
+17. [Version Control](#17-version-control)
 
 ---
 
 ## 1. Overview
 
-Poop Finder is a cross-platform React Native application (iOS, Android, Web) that helps users locate nearby public restrooms. It aggregates data from multiple free, no-key-required APIs, deduplicates results, caches them locally, and presents them through a map view, a sortable list, and a Tinder-style swipe rating interface.
+Poop Finder is a cross-platform React Native application (iOS, Android, Web) that helps users locate nearby public restrooms. It aggregates data from six free APIs, deduplicates results using a spatial grid, caches them locally, and presents them through a map view, a sortable list, and a Tinder-style swipe rating interface. Community reviews from Foursquare and OpenStreetMap are shown on each bathroom's detail page.
 
 **Bundle ID:** `com.poopfinder.app`  
 **Expo Project ID:** `43a69e70-306e-47a0-a55f-83b3fbc809aa`  
 **Owner:** `dkamlesh90`  
-**Version:** `1.0.0`
+**Version:** `1.0.0`  
+**Repository:** `https://github.com/dkamlesh90/PoopFinder`
 
 ---
 
 ## 2. Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                     App.js (root)                    │
-│  • Location permission & GPS                         │
-│  • Global bathroom state                             │
-│  • Tab navigation                                    │
-│  • Panic mode (instant directions)                   │
-└────────────┬──────────────┬──────────────┬──────────┘
-             │              │              │
-        MapScreen      ListScreen    TinderScreen
-        (native)       (FlatList)    (swipe cards)
-        MapScreen.web
-        (Leaflet)
-             │
-     ┌───────┴────────┐
-     │  bathroomService│
-     │  (data layer)   │
-     └───────┬─────────┘
-             │  Promise.allSettled (parallel)
-    ┌────────┼────────┬──────────────┐
-    │        │        │              │
- Overpass  Refuge  Wikidata    City APIs
-  (OSM)            SPARQL      (NYC…)
-             │
-      AsyncStorage
-       (local cache)
+┌──────────────────────────────────────────────────────────┐
+│                      App.js (root)                        │
+│  • Location permission & GPS                              │
+│  • Global bathroom state + filter state                   │
+│  • Tab navigation (always-mounted, display:none)          │
+│  • Panic mode (instant directions)                        │
+│  • FilterModal (global distance/feature/rating filters)   │
+└─────────────┬───────────────┬───────────────┬────────────┘
+              │               │               │
+         MapScreen       ListScreen     TinderScreen
+         (native)        (FlatList)     (swipe cards)
+         MapScreen.web
+         (Leaflet)
+              │
+      ┌───────┴────────┐
+      │  bathroomService│
+      │  (data layer)   │
+      └───────┬─────────┘
+              │  Promise.allSettled (parallel)
+   ┌──────────┼──────────┬────────────┬─────────────┐
+   │          │          │            │             │
+Overpass   Refuge    Wikidata   Foursquare    City APIs
+ (OSM)              SPARQL     Places v3     (NYC…)
+              │
+       AsyncStorage
+        (local cache)
+
+DetailScreen (overlay)
+   └── fetchFoursquareTips(fsq_id)
+   └── fetchOSMNotesNear(lat, lon)
 ```
 
 All three main screens stay **permanently mounted**. Tab switching uses `display: 'none'` rather than unmounting, which prevents the map from being re-initialised on every tab change.
+
+The `filteredBathrooms` array (derived from `bathrooms` + `filters` via `useMemo`) is passed to all screens. The raw `bathrooms` array is only modified by network fetches or cache loads.
 
 ---
 
@@ -70,12 +79,13 @@ All three main screens stay **permanently mounted**. Tab switching uses `display
 
 ```
 PoopFinder/
-├── App.js                        # Root component, location, global state
+├── App.js                        # Root component, location, global state, filters
 ├── index.js                      # Expo entry point
 ├── app.json                      # Expo config (bundle IDs, permissions, plugins)
 ├── eas.json                      # EAS Build profiles
 ├── metro.config.js               # Metro bundler config (enables .web.js resolution)
 ├── package.json
+├── .env                          # EXPO_PUBLIC_FOURSQUARE_API_KEY (gitignored)
 │
 ├── assets/
 │   ├── icon.png                  # 1024×1024 — iOS/Android store icon
@@ -87,17 +97,18 @@ PoopFinder/
 │   ├── screens/
 │   │   ├── MapScreen.js          # Native map (iOS/Android) via WebView + Leaflet
 │   │   ├── MapScreen.web.js      # Web map — Leaflet loaded directly into DOM
-│   │   ├── ListScreen.js         # Searchable/filterable bathroom list
+│   │   ├── ListScreen.js         # Searchable bathroom list
 │   │   ├── TinderScreen.js       # Swipe-to-rate interface
-│   │   ├── DetailScreen.js       # Individual bathroom detail + poop score
+│   │   ├── DetailScreen.js       # Bathroom detail + poop score + community reviews
 │   │   └── SplashScreen.js       # Animated launch screen overlay
 │   │
 │   ├── components/
 │   │   ├── BathroomCard.js       # List row card (memo)
-│   │   └── SwipeCard.js          # Animated swipe card (PanResponder)
+│   │   ├── SwipeCard.js          # Animated swipe card (PanResponder)
+│   │   └── FilterModal.js        # Global filter bottom sheet
 │   │
 │   ├── services/
-│   │   ├── bathroomService.js    # API fetching, dedup, caching
+│   │   ├── bathroomService.js    # API fetching, dedup, caching, reviews
 │   │   └── mockData.js           # Offline demo data (8 entries)
 │   │
 │   └── utils/
@@ -141,19 +152,87 @@ The root component owns all global state and orchestrates startup:
 2. On mount: hides the native splash, requests location permission, pre-loads valid cache, then starts a background fresh fetch.
 3. Renders a persistent tab bar (Map / Nearby / Rate) and conditionally shows `DetailScreen` over all tabs when a bathroom is selected.
 4. **Panic mode** — the 🚨 button immediately opens the device maps app with directions to the nearest free restroom.
+5. **Filter button** — opens `FilterModal`; badge shows count of active non-default filters.
 
 **State:**
 
 | Variable | Type | Purpose |
 |---|---|---|
 | `location` | `{latitude, longitude}` \| null | User's GPS coordinates |
-| `bathrooms` | `Bathroom[]` | Currently displayed results |
+| `bathrooms` | `Bathroom[]` | Full unfiltered results from last fetch/cache |
+| `filters` | `FilterState` | Current filter values (distance, features, rating) |
+| `filterVisible` | boolean | Controls `FilterModal` visibility |
+| `filteredBathrooms` | `Bathroom[]` | `useMemo` — `bathrooms` after `applyFilters` |
 | `loading` | boolean | Network fetch in progress |
 | `fromCache` | boolean | Current data is from local cache |
 | `fromMock` | boolean | Current data is offline demo data |
 | `tab` | `'map'`\|`'list'`\|`'tinder'` | Active tab |
 | `selectedBathroom` | `Bathroom` \| null | Triggers DetailScreen |
 | `locationError` | string \| null | Permission/GPS error message |
+| `lastFetchedRadiusRef` | `useRef<number>` | Tracks the radius of the last successful fetch |
+
+**Dynamic fetch radius:**
+
+`loadBathrooms` accepts a `radiusMeters` parameter. When the user changes the distance filter, `onApply` only triggers a new network fetch if the new radius **exceeds** `lastFetchedRadiusRef.current`. Smaller distance changes only apply client-side filtering, avoiding redundant API calls.
+
+```js
+const loadBathrooms = useCallback(async (coords, radiusMeters = DEFAULT_RADIUS) => {
+  setLoading(true);
+  try {
+    const results = await fetchNearbyBathrooms(coords.latitude, coords.longitude, radiusMeters);
+    lastFetchedRadiusRef.current = radiusMeters;
+    setBathrooms(results);
+  } catch {
+    const cached = (await loadCachedBathrooms(coords.latitude, coords.longitude))
+                ?? (await loadStaleCachedBathrooms());
+    if (cached) { setBathrooms(cached); setFromCache(true); }
+    else { setBathrooms(getMockBathrooms(...)); setFromMock(true); }
+  } finally { setLoading(false); }
+}, []);
+```
+
+---
+
+### FilterModal.js
+
+A bottom-sheet modal providing global filtering across all tabs.
+
+**Exports:**
+
+| Export | Type | Description |
+|---|---|---|
+| `DEFAULT_FILTERS` | object | Default filter state |
+| `countActiveFilters(filters)` | function | Returns count of non-default active filters |
+| `applyFilters(bathrooms, filters)` | function | Returns filtered subset of bathroom array |
+| `FilterModal` (default) | component | Bottom-sheet UI |
+
+**Filter options:**
+
+| Filter | UI | Default |
+|---|---|---|
+| Max distance | Chips: 0.1 / 0.25 / 0.5 / 1 / 2 / 3 / 5 / 10 / 25 mi | 5 mi |
+| Free only | Toggle | Off |
+| Wheelchair accessible | Toggle | Off |
+| Baby changing table | Toggle | Off |
+| Open 24/7 | Toggle | Off |
+| Minimum rating | Chips: Any / ★3+ / ★4+ / ★4.5+ | Any |
+
+**`applyFilters` logic:**
+
+```js
+export function applyFilters(bathrooms, filters) {
+  const maxM = filters.maxDistanceMi * 1609.344;
+  return bathrooms.filter((b) => {
+    if (b.distance > maxM) return false;
+    if (filters.freeOnly && b.fee) return false;
+    if (filters.accessibleOnly && !b.accessible) return false;
+    if (filters.changingTable && !b.changingTable) return false;
+    if (filters.open24h && b.openingHours !== '24/7') return false;
+    if (filters.minRating > 0 && b.rating < filters.minRating) return false;
+    return true;
+  });
+}
+```
 
 ---
 
@@ -185,8 +264,7 @@ A `requestAnimationFrame` defers Leaflet initialisation until after the containe
 
 A `FlatList` of `BathroomCard` components with:
 - Text search (filters by name)
-- Four filter chips: All / Free / Accessible / 24/7
-- Results memoised via `useMemo` — only recomputes on `[bathrooms, filter, search]`
+- Results memoised via `useMemo` on `[bathrooms, search]` — global filtering is handled upstream by `applyFilters` in App.js
 - FlatList tuned: `initialNumToRender={8}`, `maxToRenderPerBatch={8}`, `windowSize={5}`, `removeClippedSubviews`
 
 ---
@@ -206,16 +284,17 @@ Swipe-to-rate interface backed by `AsyncStorage` under key `@poopfinder_ratings`
 
 Uses `Animated.ValueXY` + `PanResponder` for gesture handling.
 
-- `onPanResponderMove` uses `Animated.event([null, { dx: position.x, dy: position.y }], { useNativeDriver: true })` — runs entirely on the UI thread.
+- `onPanResponderMove` uses `Animated.event([null, { dx: position.x, dy: position.y }], { useNativeDriver: true })` — runs entirely on the UI thread at 60 fps.
 - `forceSwipe` and `resetPosition` both use `useNativeDriver: true`.
 - Rotation and yes/no overlay opacity are derived via `.interpolate()` on `position.x`.
-- The behind-card renders a lightweight static view with no gesture handlers.
 
 ---
 
 ### DetailScreen.js
 
-Displays all fields for a selected bathroom plus a computed **Poop Score** (0–100):
+Displays all fields for a selected bathroom plus a computed **Poop Score** (0–100) and **Community Reviews**.
+
+**Poop Score:**
 
 | Condition | Points |
 |---|---|
@@ -228,6 +307,14 @@ Displays all fields for a selected bathroom plus a computed **Poop Score** (0–
 | Distance < 200 m | +15 |
 | Distance < 500 m | +8 |
 | Distance > 1000 m | −10 |
+
+**Community Reviews:**
+
+On mount, `useEffect` fires two parallel requests:
+1. `fetchFoursquareTips(bathroom.fsq_id)` — only called if the bathroom has a Foursquare ID
+2. `fetchOSMNotesNear(bathroom.latitude, bathroom.longitude, 200)` — OSM Notes within 200 m
+
+Reviews from both sources are merged into a single list. Each `ReviewRow` displays a source badge (orange = Foursquare, green = OSM Note), date, agree count (Foursquare only), and review text.
 
 ---
 
@@ -251,20 +338,36 @@ A `memo`-wrapped list row. Accessibility label is computed with `useMemo` and co
 
 Fires all sources in parallel with `Promise.allSettled`. Any number of sources can fail without blocking the result — the merged set from all successful sources is returned. If every source fails, the first rejection error is thrown.
 
-Sources are passed to `deduplicateBathrooms` in priority order: **city > osm > refuge > wikidata**. When two entries are within 60 m of each other, the higher-priority source wins.
+Source priority order (higher wins dedup):
+
+| Priority | Source | Key |
+|---|---|---|
+| 5 | City open data (NYC…) | `city` |
+| 4 | Foursquare Places v3 | `foursquare` |
+| 3 | OpenStreetMap / Overpass | `osm` |
+| 2 | Refuge Restrooms | `refuge` |
+| 1 | Wikidata | `wikidata` |
+
+`Promise.allSettled` index mapping:
+- `[0]` = Overpass
+- `[1]` = Refuge
+- `[2]` = Wikidata
+- `[3]` = Foursquare
+- `[4+]` = City sources
 
 After deduplication, results are sorted by ascending distance and saved to cache before returning.
 
 #### `deduplicateBathrooms(lists)`
 
-Uses a spatial grid (cell size ≈ 0.001° ≈ 110 m) to avoid O(n²) distance comparisons. For each incoming bathroom, only the 3×3 neighbourhood of grid cells is checked — average case O(n).
+Uses a spatial grid (cell size ≈ 0.001° ≈ 110 m) to avoid O(n²) distance comparisons. For each incoming bathroom, only the 3×3 neighbourhood of grid cells is checked — average case O(n). The first occurrence of a bathroom in priority order is kept; duplicates within 60 m are discarded.
 
 #### Bathroom object shape
 
 ```js
 {
-  id: string,              // e.g. "osm_123456", "refuge_789", "nyc_abc"
-  source: string,          // 'osm' | 'refuge' | 'wikidata' | 'city'
+  id: string,              // e.g. "osm_123456", "refuge_789", "nyc_abc", "fsq_abc123"
+  source: string,          // 'osm' | 'refuge' | 'wikidata' | 'city' | 'foursquare'
+  fsq_id: string | null,   // Foursquare venue ID (used to fetch tips)
   latitude: number,
   longitude: number,
   name: string,
@@ -276,11 +379,28 @@ Uses a spatial grid (cell size ≈ 0.001° ≈ 110 m) to avoid O(n²) distance c
   male: boolean,
   female: boolean,
   description: string | null,
+  image: string | null,    // Photo URL (Foursquare only)
   distance: number,        // metres from user
   distanceLabel: string,   // e.g. "0.3 mi" or "150 ft"
   rating: number,          // 0–5, one decimal place
 }
 ```
+
+#### `fetchFoursquareTips(fsq_id)` — exported
+
+Fetches up to 10 user tips for a Foursquare venue. Returns:
+```js
+[{ source: 'foursquare', text: string, createdAt: string, agreeCount: number, disagreeCount: number }]
+```
+Returns `[]` on error.
+
+#### `fetchOSMNotesNear(latitude, longitude, radiusMeters = 300)` — exported
+
+Fetches OSM Notes within `radiusMeters` of the given coordinates. Filters notes to only those containing bathroom-related keywords (`toilet`, `restroom`, `bathroom`, `wc`, `loo`, `lavatory`, `washroom`). Returns:
+```js
+[{ source: 'osm_note', text: string, createdAt: string }]
+```
+Returns `[]` on error.
 
 ---
 
@@ -301,7 +421,7 @@ Custom `DivIcon` markers — a circular `<div>` with a 🚽 emoji. Selected mark
 ### User location indicator
 
 - `L.circleMarker` — filled blue dot for the user's position.
-- `L.circle` — 1500 m radius semi-transparent purple fill showing the search area.
+- `L.circle` — radius semi-transparent purple fill showing the current search area. Radius scales with the selected distance filter.
 
 ---
 
@@ -318,10 +438,10 @@ Invalidation radius: **0.05° (~5 km)**
 2. loadCachedBathrooms(lat, lon)
    ├─ Valid (fresh + nearby)  → show immediately with "📦 Cached" badge
    └─ Invalid / missing       → skip
-3. fetchNearbyBathrooms(lat, lon)  [background]
-   ├─ Success → update UI, save new cache, clear badge
-   └─ Fail    → loadCachedBathrooms()   (fresh)
-               └─ null → loadStaleCachedBathrooms()  (any age)
+3. fetchNearbyBathrooms(lat, lon, radiusMeters)  [background]
+   ├─ Success → update UI, await saveCachedBathrooms(), clear badge
+   └─ Fail    → loadCachedBathrooms()        (fresh, ignores previous step)
+               └─ null → loadStaleCachedBathrooms()   (any age, no radius check)
                           └─ null → getMockBathrooms()
 ```
 
@@ -331,13 +451,13 @@ Invalidation radius: **0.05° (~5 km)**
 |---|---|---|---|
 | `loadCachedBathrooms(lat, lon)` | Yes | Yes | Pre-load on startup / first fallback |
 | `loadStaleCachedBathrooms()` | No | No | Last resort before mock data |
-| `saveCachedBathrooms(data, lat, lon)` | — | — | Called (awaited) after successful fetch |
+| `saveCachedBathrooms(data, lat, lon)` | — | — | Called with `await` after successful fetch |
+
+`saveCachedBathrooms` is explicitly awaited to prevent a race condition where a rapid re-fetch could read a partially-written cache entry.
 
 ---
 
 ## 9. External APIs
-
-All APIs are free with no API key required.
 
 ### Overpass (OpenStreetMap)
 
@@ -348,8 +468,9 @@ All APIs are free with no API key required.
 2. `https://overpass.kumi.systems/api/interpreter`
 3. `https://maps.mail.ru/osm/tools/overpass/api/interpreter`
 
-**Timeout:** 20 s per mirror  
-**Method:** POST with `application/x-www-form-urlencoded` body
+**Timeout:** Scales dynamically: `Math.min(60, Math.ceil(30 * (radiusMeters / 5000)))` seconds — proportional to fetch radius, capped at 60 s  
+**API key:** None  
+**Method:** POST with `application/x-www-form-urlencoded`
 
 ---
 
@@ -358,7 +479,8 @@ All APIs are free with no API key required.
 **Endpoint:** `https://www.refugerestrooms.org/api/v1/restrooms/by_location.json`  
 **Params:** `lat`, `lng`, `radius` (miles), `per_page=50`  
 **Focus:** LGBTQ-safe, accessible restrooms  
-**Timeout:** 15 s
+**Timeout:** 15 s  
+**API key:** None
 
 ---
 
@@ -366,7 +488,8 @@ All APIs are free with no API key required.
 
 **Endpoint:** `https://query.wikidata.org/sparql`  
 **Query:** Items of type Q6649324 (public toilet) within radius using `wikibase:around` geo service  
-**Timeout:** 8 s (reduced from 20 s — Wikidata is slow and blocks `Promise.allSettled`)
+**Timeout:** 8 s (capped to prevent slow Wikidata responses from blocking `Promise.allSettled`)  
+**API key:** None
 
 ---
 
@@ -376,7 +499,29 @@ All APIs are free with no API key required.
 **Filter:** `within_circle(location, lat, lon, radius)` spatial filter  
 **Limit:** 100 results  
 **Active when:** User is within NYC bounding box (lat 40.4–40.92, lon −74.26–−73.68)  
-**Timeout:** 15 s
+**Timeout:** 15 s  
+**API key:** None
+
+---
+
+### Foursquare Places v3
+
+**Search endpoint:** `https://api.foursquare.com/v3/places/search`  
+**Tips endpoint:** `https://api.foursquare.com/v3/places/{fsq_id}/tips`  
+**Params (search):** `query=public restroom toilet bathroom`, `ll={lat},{lon}`, `radius`, `limit=50`, `fields=fsq_id,name,location,geocodes,rating,photos,hours,description,features,price`  
+**Auth:** `Authorization: {API_KEY}` header  
+**API key:** Required — free tier available. Stored in `.env` as `EXPO_PUBLIC_FOURSQUARE_API_KEY` (gitignored)  
+**Notes:** Foursquare ratings are on a 0–10 scale; `parseFoursquarePlace` normalises to 0–5. `fsq_id` is stored on the bathroom object and used to fetch tips in `DetailScreen`.
+
+---
+
+### OSM Notes API
+
+**Endpoint:** `https://api.openstreetmap.org/api/0.6/notes.json`  
+**Params:** `bbox={lon-r},{lat-r},{lon+r},{lat+r}`, `limit=50`, `closed=0`  
+**Filtering:** Notes are filtered client-side for bathroom-related keywords in comment text  
+**API key:** None  
+**Used for:** Community reviews in `DetailScreen` — raw field reports from OSM contributors near the bathroom location
 
 ---
 
@@ -408,9 +553,21 @@ Produces a 0–5 star rating (one decimal):
 
 No external state library. All state lives in `App.js` and is passed down as props. Screens are stateless with respect to bathroom data.
 
+`filteredBathrooms` is computed in `App.js` via `useMemo`:
+
+```js
+const filteredBathrooms = useMemo(
+  () => applyFilters(bathrooms, filters),
+  [bathrooms, filters]
+);
+```
+
+All three screens and `DetailScreen` receive `filteredBathrooms`, not `bathrooms`. This means filter changes are reflected everywhere simultaneously without triggering new network requests (unless the new distance radius exceeds the last fetched radius).
+
 Local component state:
-- `ListScreen` — `filter`, `search`
+- `ListScreen` — `search`
 - `TinderScreen` — `queue`, `ratings`, `showSummary`
+- `DetailScreen` — `reviews`, `reviewsLoading`
 
 Persistence:
 - Bathroom cache — `AsyncStorage` (`@poopfinder_bathroom_cache`)
@@ -426,12 +583,15 @@ Persistence:
 | Native-driver animations | `SwipeCard.js` | `useNativeDriver: true` on all Animated values — runs on UI thread at 60 fps |
 | O(n) deduplication | `bathroomService.js` | Spatial grid replaces O(n²) `Array.find` + distance loop |
 | Memoised map HTML | `MapScreen.js` | `useMemo` on `[lat, lon]` — WebView only rebuilds on location change |
-| Memoised list results | `ListScreen.js` | `useMemo` on `[bathrooms, filter, search]` |
+| Memoised filtered list | `App.js` | `useMemo([bathrooms, filters])` — filter recompute only when inputs change |
 | Memoised cards | `BathroomCard.js` | `React.memo` prevents re-renders when parent re-renders |
 | FlatList tuning | `ListScreen.js` | `initialNumToRender=8`, `maxToRenderPerBatch=8`, `windowSize=5`, `removeClippedSubviews` |
-| Parallel API fetch | `bathroomService.js` | `Promise.allSettled` — all sources race simultaneously |
-| Wikidata timeout | `bathroomService.js` | 8 s cap prevents slow Wikidata from blocking the full result |
+| Parallel API fetch | `bathroomService.js` | `Promise.allSettled` — all six sources race simultaneously |
+| Dynamic Overpass timeout | `bathroomService.js` | Timeout scales with radius: `Math.min(60, Math.ceil(30 * (r / 5000)))` s |
+| Wikidata timeout cap | `bathroomService.js` | 8 s cap prevents slow Wikidata from blocking the full result |
+| Smart re-fetch on filter | `App.js` | New fetch only when distance filter exceeds `lastFetchedRadiusRef.current` |
 | Stale-while-revalidate | `App.js` | Cache shown immediately on startup; fresh fetch runs in background |
+| Awaited cache save | `bathroomService.js` | `await saveCachedBathrooms()` prevents race condition on rapid re-fetch |
 
 ---
 
@@ -467,15 +627,15 @@ npx eas submit --profile production --platform ios
 
 App version is managed remotely (`appVersionSource: "remote"`) and auto-increments on production builds.
 
-### Store submission requirements
+### Environment variables
 
-**iOS:**
-- Apple Developer account ($99/year)
-- `appleId`, `ascAppId`, `appleTeamId` in `eas.json` submit config
+Sensitive keys are stored in `.env` (gitignored) and accessed via Expo's `EXPO_PUBLIC_` prefix, which Metro inlines at build time:
 
-**Android:**
-- Google Play Developer account ($25 one-time)
-- Service account JSON key at `./google-play-service-account.json`
+```
+EXPO_PUBLIC_FOURSQUARE_API_KEY=<key>
+```
+
+For EAS cloud builds, add the same key as a secret in the EAS dashboard (`eas secret:create`).
 
 ---
 
@@ -516,7 +676,7 @@ Test framework: `jest-expo` preset with `@testing-library/react-native`.
 
 ### Web
 
-- `MapScreen.web.js` is auto-selected by Metro's platform extension resolution.
+- `MapScreen.web.js` is auto-selected by Metro's platform extension resolution (requires `metro.config.js` using `expo/metro-config`).
 - Leaflet is loaded via CDN script injection into the page DOM.
 - `nativeID` prop (React Native Web) maps to the HTML `id` attribute, enabling `document.getElementById` to get a real `HTMLElement` for Leaflet to attach to.
 
@@ -540,3 +700,25 @@ Uses `@resvg/resvg-js` (Rust-based SVG renderer, pre-built binaries — no compi
 | `assets/favicon.png` | 48×48 | Browser tab (web) |
 
 All icon designs use the brand gradient (`#9333EA → #3B0764`) with a map-pin + toilet motif.
+
+---
+
+## 17. Version Control
+
+**Repository:** `https://github.com/dkamlesh90/PoopFinder`  
+**Branch:** `main`  
+**Line endings:** LF (normalised via `.gitattributes` — `* text=auto eol=lf`)
+
+### .gitignore highlights
+
+- `node_modules/`, `.expo/`, `dist/`, `web-build/`
+- `.env` — API keys never committed
+- `google-play-service-account.json` — EAS credentials never committed
+- `/ios`, `/android` — generated native folders excluded
+- `.claude/` — Claude Code internal state excluded
+
+### .gitattributes
+
+- All text files normalised to LF in the repo
+- PNG, JPG, GIF, ICO treated as binary (no line-ending translation)
+- SVG treated as text with LF endings
