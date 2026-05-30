@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,32 @@ import {
   Linking,
   Platform,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { fetchFoursquareTips, fetchOSMNotesNear } from '../services/bathroomService';
 
 export default function DetailScreen({ bathroom, onBack }) {
+  const [reviews, setReviews]           = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadReviews() {
+      setReviewsLoading(true);
+      const [tips, notes] = await Promise.all([
+        bathroom.fsq_id ? fetchFoursquareTips(bathroom.fsq_id) : Promise.resolve([]),
+        fetchOSMNotesNear(bathroom.latitude, bathroom.longitude, 200),
+      ]);
+      if (!cancelled) {
+        setReviews([...tips, ...notes]);
+        setReviewsLoading(false);
+      }
+    }
+    loadReviews();
+    return () => { cancelled = true; };
+  }, [bathroom.fsq_id, bathroom.latitude, bathroom.longitude]);
+
   function openInMaps() {
     const { latitude, longitude, name } = bathroom;
     const label = encodeURIComponent(name);
@@ -84,6 +106,20 @@ export default function DetailScreen({ bathroom, onBack }) {
           <PoopScore bathroom={bathroom} />
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle} accessibilityRole="header">Community Reviews</Text>
+          {reviewsLoading ? (
+            <View style={styles.reviewsLoading}>
+              <ActivityIndicator size="small" color="#7C3AED" />
+              <Text style={styles.reviewsLoadingText}>Loading reviews…</Text>
+            </View>
+          ) : reviews.length === 0 ? (
+            <Text style={styles.noReviews}>No reviews yet for this location.</Text>
+          ) : (
+            reviews.map((r, i) => <ReviewRow key={i} review={r} />)
+          )}
+        </View>
+
         <TouchableOpacity
           style={styles.directionsBtn}
           onPress={openInMaps}
@@ -95,6 +131,31 @@ export default function DetailScreen({ bathroom, onBack }) {
           <Text style={styles.directionsBtnText}>Get Directions</Text>
         </TouchableOpacity>
       </ScrollView>
+    </View>
+  );
+}
+
+function ReviewRow({ review }) {
+  const isFSQ = review.source === 'foursquare';
+  const date  = review.createdAt
+    ? new Date(review.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+
+  return (
+    <View style={styles.reviewRow}>
+      <View style={styles.reviewHeader}>
+        <View style={[styles.reviewBadge, isFSQ ? styles.reviewBadgeFSQ : styles.reviewBadgeOSM]}>
+          <Text style={styles.reviewBadgeText}>{isFSQ ? 'Foursquare' : 'OSM Note'}</Text>
+        </View>
+        {date && <Text style={styles.reviewDate}>{date}</Text>}
+        {isFSQ && review.agreeCount > 0 && (
+          <View style={styles.reviewAgree}>
+            <Ionicons name="thumbs-up" size={11} color="#166534" />
+            <Text style={styles.reviewAgreeText}>{review.agreeCount}</Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.reviewText}>{review.text}</Text>
     </View>
   );
 }
@@ -210,6 +271,23 @@ const styles = StyleSheet.create({
   scoreLabel: { fontSize: 12, fontWeight: '700' },
   scoreReasons: { flex: 1, gap: 4 },
   reasonText: { fontSize: 13, fontWeight: '600' },
+  reviewsLoading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  reviewsLoadingText: { fontSize: 13, color: '#7C3AED' },
+  noReviews: { fontSize: 13, color: '#888', fontStyle: 'italic' },
+  reviewRow: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f0ff',
+  },
+  reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  reviewBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
+  reviewBadgeFSQ: { backgroundColor: '#FFF0E0' },
+  reviewBadgeOSM: { backgroundColor: '#E8F5E9' },
+  reviewBadgeText: { fontSize: 10, fontWeight: '700', color: '#444' },
+  reviewDate: { fontSize: 11, color: '#999', flex: 1 },
+  reviewAgree: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  reviewAgreeText: { fontSize: 11, color: '#166534', fontWeight: '700' },
+  reviewText: { fontSize: 14, color: '#333', lineHeight: 20 },
   directionsBtn: {
     flexDirection: 'row',
     alignItems: 'center',

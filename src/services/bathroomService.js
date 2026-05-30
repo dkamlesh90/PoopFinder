@@ -55,7 +55,7 @@ async function saveCachedBathrooms(bathrooms, latitude, longitude) {
 // ─── Source priority for deduplication ───────────────────────────────────────
 // Higher = preferred when two entries refer to the same physical toilet.
 // City APIs have authoritative data; OSM is rich but crowdsourced; the rest fill gaps.
-const SOURCE_PRIORITY = { city: 4, osm: 3, refuge: 2, wikidata: 1 };
+const SOURCE_PRIORITY = { city: 5, foursquare: 4, osm: 3, refuge: 2, wikidata: 1 };
 
 // ─── 1. Overpass (OpenStreetMap) ──────────────────────────────────────────────
 
@@ -337,6 +337,152 @@ function parseNYCRestroom(r, userLat, userLon) {
   };
 }
 
+// ─── 5. Foursquare Places ─────────────────────────────────────────────────────
+
+const FSQ_KEY = process.env.EXPO_PUBLIC_FOURSQUARE_API_KEY;
+const FSQ_SEARCH = 'https://api.foursquare.com/v3/places/search';
+const FSQ_TIPS   = 'https://api.foursquare.com/v3/places';
+
+async function fetchFromFoursquare(latitude, longitude, radiusMeters) {
+  if (!FSQ_KEY) throw new Error('Foursquare API key not set');
+
+  const params = new URLSearchParams({
+    ll: `${latitude},${longitude}`,
+    radius: Math.round(radiusMeters),
+    query: 'public restroom',
+    limit: '50',
+    fields: 'fsq_id,name,geocodes,location,rating',
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(`${FSQ_SEARCH}?${params}`, {
+      headers: { Authorization: FSQ_KEY, Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Foursquare HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data.results)) throw new Error('Unexpected Foursquare response shape');
+    return data.results.map((p) => parseFoursquarePlace(p, latitude, longitude)).filter(Boolean);
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+function parseFoursquarePlace(place, userLat, userLon) {
+  const lat = place.geocodes?.main?.latitude;
+  const lon = place.geocodes?.main?.longitude;
+  if (lat == null || lon == null) return null;
+
+  const distance = getDistanceMeters(userLat, userLon, lat, lon);
+  // Foursquare rates 0–10; normalise to 0–5
+  const fsqRating = place.rating != null ? parseFloat((place.rating / 2).toFixed(1)) : null;
+
+  return {
+    id: `fsq_${place.fsq_id}`,
+    fsq_id: place.fsq_id,
+    source: 'foursquare',
+    latitude: lat,
+    longitude: lon,
+    name: place.name || 'Public Restroom',
+    fee: false,
+    accessible: false,
+    changingTable: false,
+    openingHours: null,
+    unisex: false,
+    male: true,
+    female: true,
+    description: [place.location?.address, place.location?.locality].filter(Boolean).join(', ') || null,
+    distance,
+    distanceLabel: formatDistance(distance),
+    rating: fsqRating ?? computeRating({}),
+  };
+}
+
+// Fetch tips (reviews) for a single Foursquare venue — called from DetailScreen.
+export async function fetchFoursquareTips(fsq_id) {
+  if (!FSQ_KEY || !fsq_id) return [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(
+      `${FSQ_TIPS}/${fsq_id}/tips?limit=10&fields=id,created_at,text,agree_count,disagree_count`,
+      { headers: { Authorization: FSQ_KEY, Accept: 'application/json' }, signal: controller.signal }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const tips = await res.json();
+    return Array.isArray(tips)
+      ? tips.map((t) => ({
+          source: 'foursquare',
+          text: t.text,
+          createdAt: t.created_at,
+          agreeCount: t.agree_count ?? 0,
+          disagreeCount: t.disagree_count ?? 0,
+        }))
+      : [];
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
+// ─── 6. OSM Notes ─────────────────────────────────────────────────────────────
+// Community map notes near a location; filtered to bathroom-relevant content.
+
+const OSM_NOTES = 'https://api.openstreetmap.org/api/0.6/notes.json';
+const BATHROOM_KEYWORDS = ['toilet', 'restroom', 'bathroom', 'wc', 'loo', 'lavatory', 'washroom'];
+
+function containsBathroomKeyword(text) {
+  const lower = text.toLowerCase();
+  return BATHROOM_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+// Exported so DetailScreen can call it for a specific bathroom location.
+export async function fetchOSMNotesNear(latitude, longitude, radiusMeters = 300) {
+  const delta = radiusMeters / 111000;
+  const lonDelta = delta / Math.cos((latitude * Math.PI) / 180);
+  const bbox = [
+    (longitude - lonDelta).toFixed(6),
+    (latitude  - delta).toFixed(6),
+    (longitude + lonDelta).toFixed(6),
+    (latitude  + delta).toFixed(6),
+  ].join(',');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(`${OSM_NOTES}?bbox=${bbox}&limit=100&closed=7`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data.features)) return [];
+
+    const reviews = [];
+    for (const feature of data.features) {
+      const comments = feature.properties?.comments ?? [];
+      for (const c of comments) {
+        if (c.text && containsBathroomKeyword(c.text)) {
+          reviews.push({
+            source: 'osm_note',
+            text: c.text,
+            createdAt: c.date ?? null,
+          });
+        }
+      }
+    }
+    return reviews;
+  } catch {
+    clearTimeout(timer);
+    return [];
+  }
+}
+
 // ─── Deduplication ────────────────────────────────────────────────────────────
 // Uses a spatial grid to avoid O(n²) distance checks.
 // Each cell is ~110 m wide; we only compare candidates in the 3×3 neighbourhood.
@@ -404,10 +550,11 @@ export async function fetchNearbyBathrooms(latitude, longitude, radiusMeters = 5
     .map((s) => s.fetch(latitude, longitude, radiusMeters));
 
   const results = await Promise.allSettled([
-    fetchFromOverpass(latitude, longitude, radiusMeters),
-    fetchFromRefuge(latitude, longitude, radiusMeters),
-    fetchFromWikidata(latitude, longitude, radiusMeters),
-    ...activeCitySources,
+    fetchFromOverpass(latitude, longitude, radiusMeters),   // 0
+    fetchFromRefuge(latitude, longitude, radiusMeters),     // 1
+    fetchFromWikidata(latitude, longitude, radiusMeters),   // 2
+    fetchFromFoursquare(latitude, longitude, radiusMeters), // 3
+    ...activeCitySources,                                   // 4+
   ]);
 
   const allBathrooms = results
@@ -420,13 +567,15 @@ export async function fetchNearbyBathrooms(latitude, longitude, radiusMeters = 5
     throw firstFailure?.reason || new Error('No data from any source');
   }
 
+  const cityResults = results.slice(4).flatMap((r) => r.status === 'fulfilled' ? r.value : []);
+
   const merged = deduplicateBathrooms([
-    // Pass as separate lists so priority ordering is stable:
-    // city > osm > refuge > wikidata
-    results[3]?.value ?? [], // city (if active)
-    results[0]?.value ?? [], // osm
-    results[1]?.value ?? [], // refuge
-    results[2]?.value ?? [], // wikidata
+    // Priority order: city > foursquare > osm > refuge > wikidata
+    cityResults,
+    results[3]?.status === 'fulfilled' ? results[3].value : [], // foursquare
+    results[0]?.status === 'fulfilled' ? results[0].value : [], // osm
+    results[1]?.status === 'fulfilled' ? results[1].value : [], // refuge
+    results[2]?.status === 'fulfilled' ? results[2].value : [], // wikidata
   ]).sort((a, b) => a.distance - b.distance);
 
   await saveCachedBathrooms(merged, latitude, longitude);
