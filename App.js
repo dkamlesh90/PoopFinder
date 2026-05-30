@@ -143,9 +143,11 @@ export default function App() {
 
   const activeFilterCount = countActiveFilters(filters);
 
-  const handleSplashFinish     = useCallback(() => setShowSplash(false), []);
-  const handleCloseFilters     = useCallback(() => setFilterVisible(false), []);
+  const handleSplashFinish        = useCallback(() => setShowSplash(false), []);
+  const handleCloseFilters        = useCallback(() => setFilterVisible(false), []);
   const handleCloseLocationPicker = useCallback(() => setLocationPickerVisible(false), []);
+  const handleBack                = useCallback(() => setSelectedBathroom(null), []);
+  const handleViewOnMap           = useCallback(() => { setSelectedBathroom(null); setTab('map'); }, []);
   const handleApplyFilters     = useCallback((f) => {
     setFilters(f);
     setFilterVisible(false);
@@ -198,11 +200,8 @@ export default function App() {
       {selectedBathroom ? (
         <DetailScreen
           bathroom={selectedBathroom}
-          onBack={() => setSelectedBathroom(null)}
-          onViewOnMap={() => {
-            setSelectedBathroom(null);
-            setTab('map');
-          }}
+          onBack={handleBack}
+          onViewOnMap={handleViewOnMap}
         />
       ) : (
         <View style={styles.flex}>
@@ -292,7 +291,7 @@ export default function App() {
           <View style={styles.flex}>
             {/* Keep all three screens mounted — hiding vs unmounting avoids
                 re-initialising Leaflet/WebView on every tab switch */}
-            <View style={[styles.flex, tab !== 'map' && styles.hidden]}>
+            <View style={[styles.flex, tab !== 'map' && styles.hidden]} pointerEvents={tab !== 'map' ? 'none' : 'auto'}>
               <MapScreen
                 location={location}
                 bathrooms={filteredBathrooms}
@@ -301,14 +300,14 @@ export default function App() {
                 radiusMeters={filters.maxDistanceMi * 1609.344}
               />
             </View>
-            <View style={[styles.flex, tab !== 'list' && styles.hidden]}>
+            <View style={[styles.flex, tab !== 'list' && styles.hidden]} pointerEvents={tab !== 'list' ? 'none' : 'auto'}>
               <ListScreen
                 bathrooms={filteredBathrooms}
                 loading={loading}
                 onSelectBathroom={setSelectedBathroom}
               />
             </View>
-            <View style={[styles.flex, tab !== 'tinder' && styles.hidden]}>
+            <View style={[styles.flex, tab !== 'tinder' && styles.hidden]} pointerEvents={tab !== 'tinder' ? 'none' : 'auto'}>
               <TinderScreen bathrooms={filteredBathrooms} loading={loading} />
             </View>
           </View>
