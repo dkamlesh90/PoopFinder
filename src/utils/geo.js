@@ -10,7 +10,14 @@ export function getDistanceMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function formatDistance(meters) {
+// useKm=true returns metric labels, false (default) returns imperial.
+export function formatDistance(meters, useKm = false) {
+  if (useKm) {
+    const km = meters / 1000;
+    if (km < 0.1) return `${Math.round(meters)} m`;
+    if (km < 10) return `${km.toFixed(1)} km`;
+    return `${Math.round(km)} km`;
+  }
   const miles = meters / 1609.344;
   if (miles < 0.1) return `${Math.round(meters * 3.28084)} ft`;
   if (miles < 10) return `${miles.toFixed(1)} mi`;

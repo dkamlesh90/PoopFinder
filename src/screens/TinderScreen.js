@@ -158,8 +158,8 @@ export default function TinderScreen({ bathrooms, loading }) {
       </View>
 
       <View style={styles.actionRow}>
-        <ActionButton icon="close"   color="#991B1B" bg="#fdf0ef" label="Pass"       onPress={() => handleSwipeLeft(topCard)} />
-        <ActionButton icon="heart"   color="#166534" bg="#edfbf3" label="Would Poop" onPress={() => handleSwipeRight(topCard)} large />
+        <ActionButton icon="close"   color="#991B1B" bg="#fdf0ef" label="Pass"       onPress={() => topCard && handleSwipeLeft(topCard)} />
+        <ActionButton icon="heart"   color="#166534" bg="#edfbf3" label="Would Poop" onPress={() => topCard && handleSwipeRight(topCard)} large />
         <ActionButton icon="refresh" color="#6D28D9" bg="#f3efff" label="Skip"       onPress={advanceQueue} />
       </View>
     </Animated.View>

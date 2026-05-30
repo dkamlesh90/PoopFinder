@@ -22,6 +22,7 @@ import SplashScreen from './src/screens/SplashScreen';
 import FilterModal, { DEFAULT_FILTERS, countActiveFilters, applyFilters } from './src/components/FilterModal';
 import LocationPickerModal from './src/components/LocationPickerModal';
 import { fetchNearbyBathrooms, loadCachedBathrooms, loadStaleCachedBathrooms, getMockBathrooms } from './src/services/bathroomService';
+import { formatDistance } from './src/utils/geo';
 
 ExpoSplashScreen.preventAutoHideAsync();
 
@@ -130,12 +131,29 @@ export default function App() {
     requestLocation();
   }, [requestLocation]);
 
-  const filteredBathrooms = useMemo(
-    () => applyFilters(bathrooms, filters),
-    [bathrooms, filters]
-  );
+  const filteredBathrooms = useMemo(() => {
+    const filtered = applyFilters(bathrooms, filters);
+    if (!filters.useKm) return filtered;
+    // Reformat distance labels when the user has chosen km
+    return filtered.map((b) => ({
+      ...b,
+      distanceLabel: formatDistance(b.distance, true),
+    }));
+  }, [bathrooms, filters]);
 
   const activeFilterCount = countActiveFilters(filters);
+
+  const handleSplashFinish     = useCallback(() => setShowSplash(false), []);
+  const handleCloseFilters     = useCallback(() => setFilterVisible(false), []);
+  const handleCloseLocationPicker = useCallback(() => setLocationPickerVisible(false), []);
+  const handleApplyFilters     = useCallback((f) => {
+    setFilters(f);
+    setFilterVisible(false);
+    const newRadiusM = f.maxDistanceMi * 1609.344;
+    if (location && newRadiusM > lastFetchedRadiusRef.current) {
+      loadBathrooms(location, newRadiusM);
+    }
+  }, [location, loadBathrooms]);
 
   // Panic mode: open directions to the best available bathroom immediately
   const handlePanic = useCallback(() => {
@@ -178,7 +196,14 @@ export default function App() {
       <StatusBar style="light" />
 
       {selectedBathroom ? (
-        <DetailScreen bathroom={selectedBathroom} onBack={() => setSelectedBathroom(null)} />
+        <DetailScreen
+          bathroom={selectedBathroom}
+          onBack={() => setSelectedBathroom(null)}
+          onViewOnMap={() => {
+            setSelectedBathroom(null);
+            setTab('map');
+          }}
+        />
       ) : (
         <View style={styles.flex}>
           <View style={styles.appHeader}>
@@ -318,24 +343,17 @@ export default function App() {
         currentName={locationName}
         onSelect={handlePickLocation}
         onUseGPS={handleUseGPS}
-        onClose={() => setLocationPickerVisible(false)}
+        onClose={handleCloseLocationPicker}
       />
 
       <FilterModal
         visible={filterVisible}
         filters={filters}
-        onApply={(f) => {
-          setFilters(f);
-          setFilterVisible(false);
-          const newRadiusM = f.maxDistanceMi * 1609.344;
-          if (location && newRadiusM > lastFetchedRadiusRef.current) {
-            loadBathrooms(location, newRadiusM);
-          }
-        }}
-        onClose={() => setFilterVisible(false)}
+        onApply={handleApplyFilters}
+        onClose={handleCloseFilters}
       />
 
-      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+      {showSplash && <SplashScreen onFinish={handleSplashFinish} />}
     </SafeAreaView>
   );
 }

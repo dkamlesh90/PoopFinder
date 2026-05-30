@@ -25,7 +25,7 @@ describe('getDistanceMeters', () => {
   });
 });
 
-describe('formatDistance', () => {
+describe('formatDistance (imperial, default)', () => {
   it('shows feet for distances under 0.1 miles (~161 m)', () => {
     const result = formatDistance(100);
     expect(result).toMatch(/ft$/);
@@ -49,50 +49,68 @@ describe('formatDistance', () => {
   });
 });
 
+describe('formatDistance (metric, useKm=true)', () => {
+  it('shows meters for distances under 0.1 km', () => {
+    const result = formatDistance(50, true);
+    expect(result).toMatch(/m$/);
+    expect(result).toBe('50 m');
+  });
+
+  it('shows one decimal km for distances under 10 km', () => {
+    const result = formatDistance(1500, true);
+    expect(result).toMatch(/km$/);
+    expect(result).toContain('1.5');
+  });
+
+  it('shows rounded km for distances 10+ km', () => {
+    const result = formatDistance(25000, true);
+    expect(result).toBe('25 km');
+  });
+});
+
 describe('computeRating', () => {
-  it('returns 3.0 as the base rating with no tags', () => {
+  // Base score is 2.5
+  it('returns 2.5 for empty tags (paid, no features)', () => {
+    expect(computeRating({ fee: 'yes' })).toBe(2.5);
+  });
+
+  it('adds 0.5 when fee is not "yes" (free bonus)', () => {
+    expect(computeRating({ fee: 'no' })).toBe(3.0);
+    // Undefined fee also gets the free bonus
     expect(computeRating({})).toBe(3.0);
   });
 
-  it('adds 0.5 for wheelchair access', () => {
-    expect(computeRating({ wheelchair: 'yes' })).toBe(3.5);
-  });
-
-  it('adds 0.3 for changing table', () => {
-    expect(computeRating({ changing_table: 'yes' })).toBe(3.3);
-  });
-
-  it('adds 0.2 when fee is not "yes"', () => {
-    expect(computeRating({ fee: 'no' })).toBe(3.2);
-    expect(computeRating({})).toBe(3.0); // undefined fee also gets the bonus
-  });
-
   it('does NOT add the free bonus when fee is "yes"', () => {
-    expect(computeRating({ fee: 'yes' })).toBe(3.0);
+    expect(computeRating({ fee: 'yes' })).toBe(2.5);
   });
 
-  it('adds 0.5 for 24/7 opening hours', () => {
-    expect(computeRating({ opening_hours: '24/7' })).toBe(3.5);
+  it('adds 0.7 for wheelchair access', () => {
+    expect(computeRating({ fee: 'yes', wheelchair: 'yes' })).toBe(3.2);
   });
 
-  it('returns the maximum possible score of 5.0', () => {
-    const rating = computeRating({
-      wheelchair: 'yes',
-      changing_table: 'yes',
-      fee: 'no',
-      opening_hours: '24/7',
-    });
-    // 3.0 + 0.5 + 0.3 + 0.2 + 0.5 = 4.5, which is ≤ 5
-    expect(rating).toBe(4.5);
+  it('adds 0.4 for changing table', () => {
+    expect(computeRating({ fee: 'yes', changing_table: 'yes' })).toBe(2.9);
+  });
+
+  it('adds 0.6 for 24/7 opening hours', () => {
+    expect(computeRating({ fee: 'yes', opening_hours: '24/7' })).toBe(3.1);
+  });
+
+  it('adds 0.3 for a named non-generic location', () => {
+    expect(computeRating({ fee: 'yes', name: 'Central Park Restroom' })).toBe(2.8);
+  });
+
+  it('does not add name bonus for generic "Public Restroom" name', () => {
+    expect(computeRating({ fee: 'yes', name: 'Public Restroom' })).toBe(2.5);
   });
 
   it('caps at 5.0', () => {
-    // Even with all bonuses the cap should hold
     const rating = computeRating({
       wheelchair: 'yes',
       changing_table: 'yes',
       fee: 'no',
       opening_hours: '24/7',
+      name: 'Grand Central Station',
     });
     expect(rating).toBeLessThanOrEqual(5.0);
   });

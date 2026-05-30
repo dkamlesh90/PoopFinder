@@ -1,18 +1,26 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { View, Text, Animated, StyleSheet, Dimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
 export default function SplashScreen({ onFinish }) {
-  const emojiScale   = useRef(new Animated.Value(0)).current;
-  const emojiOpacity = useRef(new Animated.Value(0)).current;
-  const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleY       = useRef(new Animated.Value(20)).current;
+  const emojiScale      = useRef(new Animated.Value(0)).current;
+  const emojiOpacity    = useRef(new Animated.Value(0)).current;
+  const titleOpacity    = useRef(new Animated.Value(0)).current;
+  const titleY          = useRef(new Animated.Value(20)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
-  const dot1 = useRef(new Animated.Value(0)).current;
-  const dot2 = useRef(new Animated.Value(0)).current;
-  const dot3 = useRef(new Animated.Value(0)).current;
-  const screenOpacity = useRef(new Animated.Value(1)).current;
+  const dot1            = useRef(new Animated.Value(0)).current;
+  const dot2            = useRef(new Animated.Value(0)).current;
+  const dot3            = useRef(new Animated.Value(0)).current;
+  const screenOpacity   = useRef(new Animated.Value(1)).current;
+  // Keep a reference to the dot loop so we can stop it on unmount
+  const dotLoopRef      = useRef(null);
+
+  const stopAnimations = useCallback(() => {
+    dotLoopRef.current?.stop();
+    [emojiScale, emojiOpacity, titleOpacity, titleY, subtitleOpacity, dot1, dot2, dot3, screenOpacity]
+      .forEach((v) => v.stopAnimation());
+  }, [emojiScale, emojiOpacity, titleOpacity, titleY, subtitleOpacity, dot1, dot2, dot3, screenOpacity]);
 
   useEffect(() => {
     function bounceDot(dot) {
@@ -24,17 +32,9 @@ export default function SplashScreen({ onFinish }) {
 
     // 1. Emoji bounces in
     Animated.spring(emojiScale, {
-      toValue: 1,
-      friction: 4,
-      tension: 80,
-      useNativeDriver: true,
+      toValue: 1, friction: 4, tension: 80, useNativeDriver: true,
     }).start();
-
-    Animated.timing(emojiOpacity, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
+    Animated.timing(emojiOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
 
     // 2. Title slides up after emoji
     Animated.sequence([
@@ -52,19 +52,20 @@ export default function SplashScreen({ onFinish }) {
     ]).start();
 
     // 4. Loading dots stagger in and loop
-    Animated.sequence([
-      Animated.delay(800),
-      Animated.loop(
-        Animated.stagger(180, [bounceDot(dot1), bounceDot(dot2), bounceDot(dot3)])
-      ),
-    ]).start();
+    const loop = Animated.loop(
+      Animated.stagger(180, [bounceDot(dot1), bounceDot(dot2), bounceDot(dot3)])
+    );
+    dotLoopRef.current = loop;
+    Animated.sequence([Animated.delay(800), loop]).start();
 
     // 5. Fade out and call onFinish after minimum display time
     Animated.sequence([
       Animated.delay(2200),
       Animated.timing(screenOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
     ]).start(() => onFinish());
-  }, [onFinish, emojiScale, emojiOpacity, titleOpacity, titleY, subtitleOpacity, dot1, dot2, dot3, screenOpacity]);
+
+    return stopAnimations;
+  }, [onFinish, emojiScale, emojiOpacity, titleOpacity, titleY, subtitleOpacity, dot1, dot2, dot3, screenOpacity, stopAnimations]);
 
   return (
     <Animated.View

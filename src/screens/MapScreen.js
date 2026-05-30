@@ -94,9 +94,11 @@ function buildMapHTML(lat, lon, radiusMeters) {
 export default function MapScreen({ location, bathrooms, loading, onSelectBathroom, radiusMeters = 8047 }) {
   const webviewRef = useRef(null);
 
+  // Only rebuild HTML when location changes; radius updates are pushed via injectJavaScript
   const mapHtml = useMemo(
     () => location ? buildMapHTML(location.latitude, location.longitude, radiusMeters) : null,
-    [location?.latitude, location?.longitude, radiusMeters],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [location?.latitude, location?.longitude],
   );
 
   const injectBathrooms = useCallback(() => {
@@ -124,6 +126,10 @@ export default function MapScreen({ location, bathrooms, loading, onSelectBathro
   useEffect(() => {
     injectBathrooms();
   }, [injectBathrooms]);
+
+  useEffect(() => {
+    webviewRef.current?.injectJavaScript(`window.updateRadius(${radiusMeters});true;`);
+  }, [radiusMeters]);
 
   if (!location) {
     return (

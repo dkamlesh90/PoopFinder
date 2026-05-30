@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ export const DEFAULT_FILTERS = {
   changingTable: false,
   open24h: false,
   minRating: 0,
+  useKm: false,
 };
 
 export function countActiveFilters(filters) {
@@ -27,6 +28,7 @@ export function countActiveFilters(filters) {
   if (filters.changingTable)  n++;
   if (filters.open24h)        n++;
   if (filters.minRating > 0)  n++;
+  if (filters.useKm)          n++;
   return n;
 }
 
@@ -43,16 +45,18 @@ export function applyFilters(bathrooms, filters) {
   });
 }
 
+// Distance options in miles; km labels are shown when useKm is active.
+// Values are always stored in miles internally; converted for display only.
 const DISTANCE_OPTIONS = [
-  { label: '0.1 mi', value: 0.1  },
-  { label: '0.25 mi', value: 0.25 },
-  { label: '0.5 mi', value: 0.5  },
-  { label: '1 mi',   value: 1    },
-  { label: '2 mi',   value: 2    },
-  { label: '3 mi',   value: 3    },
-  { label: '5 mi',   value: 5    },
-  { label: '10 mi',  value: 10   },
-  { label: '25 mi',  value: 25   },
+  { labelMi: '0.1 mi',  labelKm: '0.2 km', value: 0.1  },
+  { labelMi: '0.25 mi', labelKm: '0.4 km', value: 0.25 },
+  { labelMi: '0.5 mi',  labelKm: '0.8 km', value: 0.5  },
+  { labelMi: '1 mi',    labelKm: '1.6 km', value: 1    },
+  { labelMi: '2 mi',    labelKm: '3.2 km', value: 2    },
+  { labelMi: '3 mi',    labelKm: '5 km',   value: 3    },
+  { labelMi: '5 mi',    labelKm: '8 km',   value: 5    },
+  { labelMi: '10 mi',   labelKm: '16 km',  value: 10   },
+  { labelMi: '25 mi',   labelKm: '40 km',  value: 25   },
 ];
 
 const RATING_OPTIONS = [
@@ -69,9 +73,14 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
     if (visible) setLocal(filters);
   }, [visible, filters]);
 
-  function toggle(key) {
+  const toggle = useCallback((key) => {
     setLocal((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
+  }, []);
+
+  const toggleFreeOnly       = useCallback(() => toggle('freeOnly'),       [toggle]);
+  const toggleAccessibleOnly = useCallback(() => toggle('accessibleOnly'), [toggle]);
+  const toggleChangingTable  = useCallback(() => toggle('changingTable'),  [toggle]);
+  const toggleOpen24h        = useCallback(() => toggle('open24h'),        [toggle]);
 
   const activeCount = countActiveFilters(local);
 
@@ -83,7 +92,13 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+      <TouchableOpacity
+        style={styles.backdrop}
+        activeOpacity={1}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close filters"
+      />
 
       <View style={styles.sheet}>
         {/* Header */}
@@ -107,11 +122,34 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
         </View>
 
         <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+          {/* Distance unit toggle */}
+          <Text style={styles.sectionLabel}>Distance Unit</Text>
+          <View style={styles.unitRow}>
+            {[{ label: 'Miles', km: false }, { label: 'Kilometres', km: true }].map((opt) => {
+              const active = local.useKm === opt.km;
+              return (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[styles.unitBtn, active && styles.unitBtnActive]}
+                  onPress={() => setLocal((p) => ({ ...p, useKm: opt.km }))}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active }}
+                  accessibilityLabel={opt.label}
+                >
+                  <Text style={[styles.unitBtnText, active && styles.unitBtnTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           {/* Distance */}
           <Text style={styles.sectionLabel}>Max Distance</Text>
           <View style={styles.chipRow}>
             {DISTANCE_OPTIONS.map((opt) => {
               const active = local.maxDistanceMi === opt.value;
+              const label = local.useKm ? opt.labelKm : opt.labelMi;
               return (
                 <TouchableOpacity
                   key={opt.value}
@@ -119,10 +157,10 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
                   onPress={() => setLocal((p) => ({ ...p, maxDistanceMi: opt.value }))}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: active }}
-                  accessibilityLabel={opt.label}
+                  accessibilityLabel={label}
                 >
                   <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                    {opt.label}
+                    {label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -135,25 +173,25 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
             icon="cash-outline"
             label="Free entry"
             value={local.freeOnly}
-            onToggle={() => toggle('freeOnly')}
+            onToggle={toggleFreeOnly}
           />
           <ToggleRow
             icon="accessibility"
             label="Wheelchair accessible"
             value={local.accessibleOnly}
-            onToggle={() => toggle('accessibleOnly')}
+            onToggle={toggleAccessibleOnly}
           />
           <ToggleRow
             icon="person"
             label="Baby changing table"
             value={local.changingTable}
-            onToggle={() => toggle('changingTable')}
+            onToggle={toggleChangingTable}
           />
           <ToggleRow
             icon="time-outline"
             label="Open 24/7"
             value={local.open24h}
-            onToggle={() => toggle('open24h')}
+            onToggle={toggleOpen24h}
           />
 
           {/* Min rating */}
@@ -197,7 +235,7 @@ export default function FilterModal({ visible, filters, onApply, onClose }) {
   );
 }
 
-function ToggleRow({ icon, label, value, onToggle }) {
+const ToggleRow = memo(function ToggleRow({ icon, label, value, onToggle }) {
   return (
     <TouchableOpacity
       style={styles.toggleRow}
@@ -218,7 +256,7 @@ function ToggleRow({ icon, label, value, onToggle }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   backdrop: {
@@ -264,6 +302,24 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 6,
   },
+  unitRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  unitBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e0d5ff',
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  unitBtnActive: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
+  unitBtnText: { fontSize: 14, fontWeight: '600', color: '#7C3AED' },
+  unitBtnTextActive: { color: '#fff' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   chip: {
     paddingHorizontal: 18,

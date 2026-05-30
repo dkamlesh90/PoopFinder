@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,16 @@ import {
   TouchableOpacity,
   Linking,
   Platform,
+  Share,
   Image,
   ActivityIndicator,
+  ToastAndroid,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchFoursquareTips, fetchOSMNotesNear } from '../services/bathroomService';
 import AdBanner from '../components/AdBanner';
+import { useFavorites } from '../hooks/useFavorites';
 
 const SOURCE_LABELS = {
   osm: 'OpenStreetMap',
@@ -20,11 +24,14 @@ const SOURCE_LABELS = {
   refuge: 'Refuge',
   wikidata: 'Wikidata',
   city: 'City Data',
+  mock: 'Demo',
 };
 
-export default function DetailScreen({ bathroom, onBack }) {
-  const [reviews, setReviews]           = useState([]);
+export default function DetailScreen({ bathroom, onBack, onViewOnMap }) {
+  const [reviews, setReviews]               = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
+  const { isFavorite, toggleFavorite }      = useFavorites();
+  const favorited = isFavorite(bathroom.id);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,15 +50,59 @@ export default function DetailScreen({ bathroom, onBack }) {
     return () => { cancelled = true; };
   }, [bathroom.fsq_id, bathroom.latitude, bathroom.longitude]);
 
-  function openInMaps() {
+  const openInMaps = useCallback(() => {
     const { latitude, longitude, name } = bathroom;
     const label = encodeURIComponent(name);
-    const url =
-      Platform.OS === 'ios'
-        ? `maps:?q=${label}&ll=${latitude},${longitude}`
-        : `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
+    let url;
+    if (Platform.OS === 'ios') {
+      url = `maps:?q=${label}&ll=${latitude},${longitude}`;
+    } else if (Platform.OS === 'web') {
+      url = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    } else {
+      url = `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
+    }
     Linking.openURL(url);
-  }
+  }, [bathroom]);
+
+  const handleCopyAddress = useCallback(() => {
+    const addressParts = [bathroom.name, bathroom.description].filter(Boolean);
+    const coordsFallback = `${bathroom.latitude.toFixed(5)}, ${bathroom.longitude.toFixed(5)}`;
+    const text = addressParts.length ? addressParts.join(' — ') : coordsFallback;
+
+    if (Platform.OS === 'web') {
+      // Use the Web Clipboard API when available
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    } else {
+      // RN deprecated Clipboard — still works through RN 0.81
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('react-native').Clipboard.setString(text);
+    }
+
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Address copied', ToastAndroid.SHORT);
+    } else if (Platform.OS !== 'web') {
+      Alert.alert('Copied', 'Address copied to clipboard.');
+    }
+  }, [bathroom]);
+
+  const handleShare = useCallback(async () => {
+    const { name, latitude, longitude, distanceLabel, description } = bathroom;
+    const mapsUrl =
+      Platform.OS === 'ios'
+        ? `https://maps.apple.com/?q=${encodeURIComponent(name)}&ll=${latitude},${longitude}`
+        : `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const lines = [
+      `🚽 ${name}`,
+      distanceLabel ? `${distanceLabel} away` : null,
+      description || null,
+      mapsUrl,
+    ].filter(Boolean);
+    try {
+      await Share.share({ message: lines.join('\n'), url: mapsUrl });
+    } catch {}
+  }, [bathroom]);
 
   const stars = Math.round(bathroom.rating);
 
@@ -69,7 +120,38 @@ export default function DetailScreen({ bathroom, onBack }) {
         <Text style={styles.headerTitle} accessibilityRole="header" numberOfLines={1}>
           Restroom Details
         </Text>
-        <View style={{ width: 44 }} />
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => toggleFavorite(bathroom.id)}
+            style={styles.headerIconBtn}
+            accessibilityRole="togglebutton"
+            accessibilityLabel={favorited ? 'Remove from favorites' : 'Add to favorites'}
+            accessibilityState={{ checked: favorited }}
+          >
+            <Ionicons
+              name={favorited ? 'heart' : 'heart-outline'}
+              size={20}
+              color={favorited ? '#E11D48' : '#7C3AED'}
+              accessibilityElementsHidden
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleCopyAddress}
+            style={styles.headerIconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Copy address to clipboard"
+          >
+            <Ionicons name="copy-outline" size={20} color="#7C3AED" accessibilityElementsHidden />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleShare}
+            style={styles.headerIconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Share this restroom"
+          >
+            <Ionicons name="share-outline" size={20} color="#7C3AED" accessibilityElementsHidden />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -92,8 +174,8 @@ export default function DetailScreen({ bathroom, onBack }) {
           </View>
           {bathroom.ratingDetails?.length > 1 && (
             <View style={styles.ratingSourcesRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              {bathroom.ratingDetails.map((r, i) => (
-                <View key={i} style={styles.ratingSourceChip}>
+              {bathroom.ratingDetails.map((r) => (
+                <View key={r.source} style={styles.ratingSourceChip}>
                   <Text style={styles.ratingSourceText}>{SOURCE_LABELS[r.source] ?? r.source}</Text>
                   <Text style={styles.ratingSourceScore}>{r.rating.toFixed(1)}</Text>
                 </View>
@@ -101,6 +183,12 @@ export default function DetailScreen({ bathroom, onBack }) {
             </View>
           )}
           <Text style={styles.distanceLabel}>{bathroom.distanceLabel} away</Text>
+          {bathroom.source === 'mock' && (
+            <View style={styles.demoNotice}>
+              <Ionicons name="information-circle-outline" size={13} color="#6D28D9" accessibilityElementsHidden />
+              <Text style={styles.demoNoticeText}>Demo data — refresh to see real restrooms</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -137,20 +225,33 @@ export default function DetailScreen({ bathroom, onBack }) {
           ) : reviews.length === 0 ? (
             <Text style={styles.noReviews}>No reviews yet for this location.</Text>
           ) : (
-            reviews.map((r, i) => <ReviewRow key={i} review={r} />)
+            reviews.map((r, i) => <ReviewRow key={`${r.source}_${i}`} review={r} />)
           )}
         </View>
 
-        <TouchableOpacity
-          style={styles.directionsBtn}
-          onPress={openInMaps}
-          accessibilityRole="button"
-          accessibilityLabel={`Get directions to ${bathroom.name}`}
-          accessibilityHint="Opens your maps app with directions"
-        >
-          <Ionicons name="navigate" size={20} color="#fff" accessibilityElementsHidden />
-          <Text style={styles.directionsBtnText}>Get Directions</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          {onViewOnMap && (
+            <TouchableOpacity
+              style={styles.viewMapBtn}
+              onPress={onViewOnMap}
+              accessibilityRole="button"
+              accessibilityLabel="View this restroom on the map"
+            >
+              <Ionicons name="map-outline" size={20} color="#7C3AED" accessibilityElementsHidden />
+              <Text style={styles.viewMapBtnText}>View on Map</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[styles.directionsBtn, onViewOnMap && styles.directionsBtnFlex]}
+            onPress={openInMaps}
+            accessibilityRole="button"
+            accessibilityLabel={`Get directions to ${bathroom.name}`}
+            accessibilityHint="Opens your maps app with directions"
+          >
+            <Ionicons name="navigate" size={20} color="#fff" accessibilityElementsHidden />
+            <Text style={styles.directionsBtnText}>Get Directions</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </View>
   );
@@ -251,6 +352,8 @@ const styles = StyleSheet.create({
   },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#222', flex: 1, textAlign: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  headerIconBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   content: { padding: 16, paddingBottom: 40 },
   heroCard: {
     backgroundColor: '#fff',
@@ -269,7 +372,18 @@ const styles = StyleSheet.create({
   heroName: { fontSize: 20, fontWeight: '800', color: '#222', textAlign: 'center', marginBottom: 8 },
   starsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 3 },
   ratingLabel: { fontSize: 14, color: '#666', marginLeft: 6 },
-  distanceLabel: { fontSize: 14, color: '#7C3AED', fontWeight: '600' },
+  distanceLabel: { fontSize: 14, color: '#7C3AED', fontWeight: '600', marginBottom: 4 },
+  demoNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    backgroundColor: '#f3eeff',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  demoNoticeText: { fontSize: 11, color: '#6D28D9', fontWeight: '600' },
   ratingSourcesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -329,7 +443,26 @@ const styles = StyleSheet.create({
   reviewAgree: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   reviewAgreeText: { fontSize: 11, color: '#166534', fontWeight: '700' },
   reviewText: { fontSize: 14, color: '#333', lineHeight: 20 },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  viewMapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3eeff',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: '#e0d0ff',
+  },
+  viewMapBtnText: { color: '#7C3AED', fontSize: 15, fontWeight: '700' },
   directionsBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -344,5 +477,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
+  directionsBtnFlex: { flex: 1 },
   directionsBtnText: { color: '#fff', fontSize: 17, fontWeight: '800' },
 });

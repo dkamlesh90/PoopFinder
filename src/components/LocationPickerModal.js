@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -41,13 +41,21 @@ export default function LocationPickerModal({ visible, currentName, onSelect, on
     }
   }, []);
 
-  const onChangeText = (text) => {
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
+
+  const onChangeText = useCallback((text) => {
     setQuery(text);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => search(text), 500);
-  };
+  }, [search]);
 
-  const handleSelect = (item) => {
+  const clearState = useCallback(() => {
+    setQuery('');
+    setResults([]);
+    setSearched(false);
+  }, []);
+
+  const handleSelect = useCallback((item) => {
     Keyboard.dismiss();
     const name = item.display_name.split(',').slice(0, 2).join(',').trim();
     onSelect({
@@ -55,24 +63,18 @@ export default function LocationPickerModal({ visible, currentName, onSelect, on
       longitude: parseFloat(item.lon),
       name,
     });
-    setQuery('');
-    setResults([]);
-    setSearched(false);
-  };
+    clearState();
+  }, [onSelect, clearState]);
 
-  const handleUseGPS = () => {
-    setQuery('');
-    setResults([]);
-    setSearched(false);
+  const handleUseGPS = useCallback(() => {
+    clearState();
     onUseGPS();
-  };
+  }, [onUseGPS, clearState]);
 
-  const handleClose = () => {
-    setQuery('');
-    setResults([]);
-    setSearched(false);
+  const handleClose = useCallback(() => {
+    clearState();
     onClose();
-  };
+  }, [onClose, clearState]);
 
   return (
     <Modal

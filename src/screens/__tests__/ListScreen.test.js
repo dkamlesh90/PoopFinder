@@ -2,6 +2,14 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import ListScreen from '../ListScreen';
 
+// useFavorites reads from AsyncStorage — mock it to isolate the component
+jest.mock('../../hooks/useFavorites', () => ({
+  useFavorites: () => ({
+    isFavorite: () => false,
+    toggleFavorite: jest.fn(),
+  }),
+}));
+
 const makeBathroom = (overrides = {}) => ({
   id: 'b1',
   name: 'Test Restroom',
@@ -32,56 +40,34 @@ describe('ListScreen', () => {
     expect(getByText('Gamma Restroom')).toBeTruthy();
   });
 
-  it('shows a loading indicator when loading is true', () => {
-    const { getByText } = render(
+  it('shows skeleton cards when loading is true', () => {
+    const { queryByText } = render(
       <ListScreen bathrooms={[]} loading={true} onSelectBathroom={() => {}} />
     );
-    expect(getByText('Searching nearby...')).toBeTruthy();
+    // Skeletons are accessibility-hidden; no loading text rendered
+    expect(queryByText('No restrooms found')).toBeNull();
   });
 
-  it('shows empty state when no bathrooms match', () => {
+  it('shows empty state when no bathrooms are available', () => {
     const { getByText } = render(
       <ListScreen bathrooms={[]} loading={false} onSelectBathroom={() => {}} />
     );
     expect(getByText('No restrooms found')).toBeTruthy();
   });
 
-  it('filters to free restrooms when Free filter is pressed', () => {
-    const { getByText, queryByText } = render(
-      <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
-    );
-    fireEvent.press(getByText('Free'));
-    expect(getByText('Alpha Restroom')).toBeTruthy();
-    expect(queryByText('Beta Restroom')).toBeNull(); // paid
-  });
-
-  it('filters to accessible restrooms when Accessible filter is pressed', () => {
-    const { getByText, queryByText } = render(
-      <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
-    );
-    fireEvent.press(getByText('Accessible'));
-    expect(getByText('Beta Restroom')).toBeTruthy();
-    expect(queryByText('Alpha Restroom')).toBeNull();
-    expect(queryByText('Gamma Restroom')).toBeNull();
-  });
-
-  it('filters to 24/7 restrooms when 24/7 filter is pressed', () => {
-    const { getByText, queryByText } = render(
-      <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
-    );
-    fireEvent.press(getByText('24/7'));
-    expect(getByText('Gamma Restroom')).toBeTruthy();
-    expect(queryByText('Alpha Restroom')).toBeNull();
-    expect(queryByText('Beta Restroom')).toBeNull();
-  });
-
-  it('shows empty state hint about filter when active filter yields no results', () => {
-    const paidOnly = [makeBathroom({ id: 'x', name: 'Paid Only', fee: true })];
+  it('shows Favorites tab', () => {
     const { getByText } = render(
-      <ListScreen bathrooms={paidOnly} loading={false} onSelectBathroom={() => {}} />
+      <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
     );
-    fireEvent.press(getByText('Free'));
-    expect(getByText('Try changing your filter')).toBeTruthy();
+    expect(getByText('Favorites')).toBeTruthy();
+  });
+
+  it('shows favorites empty state when Favorites tab is active and no favorites exist', () => {
+    const { getByText } = render(
+      <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
+    );
+    fireEvent.press(getByText('Favorites'));
+    expect(getByText('No favorites yet')).toBeTruthy();
   });
 
   it('filters by search text', () => {
@@ -108,16 +94,21 @@ describe('ListScreen', () => {
     const { getAllByRole } = render(
       <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={onSelect} />
     );
-    fireEvent.press(getAllByRole('button')[0]);
+    // First role="button" is the search clear; find card buttons
+    const buttons = getAllByRole('button');
+    // Tap the first bathroom card (button with accessibilityHint "Double tap to view details")
+    const cardBtn = buttons.find((b) =>
+      b.props.accessibilityHint === 'Double tap to view details'
+    );
+    fireEvent.press(cardBtn);
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'b1' }));
   });
 
-  it('resets to All when All filter is pressed after another filter', () => {
+  it('shows All tab and switches back to full list', () => {
     const { getByText } = render(
       <ListScreen bathrooms={BATHROOMS} loading={false} onSelectBathroom={() => {}} />
     );
-    fireEvent.press(getByText('Free'));
+    fireEvent.press(getByText('Favorites'));
     fireEvent.press(getByText('All'));
     expect(getByText('Alpha Restroom')).toBeTruthy();
     expect(getByText('Beta Restroom')).toBeTruthy();

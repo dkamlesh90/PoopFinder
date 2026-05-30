@@ -2,7 +2,7 @@ import React, { memo, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-const BathroomCard = memo(({ bathroom, onPress }) => {
+const BathroomCard = memo(({ bathroom, onPress, isFavorite, onToggleFavorite }) => {
   const stars = Math.round(bathroom.rating);
 
   const a11yLabel = useMemo(() => {
@@ -57,6 +57,19 @@ const BathroomCard = memo(({ bathroom, onPress }) => {
         </View>
       </View>
 
+      {onToggleFavorite && (
+        <TouchableOpacity
+          onPress={(e) => { e.stopPropagation?.(); onToggleFavorite(bathroom.id); }}
+          style={styles.favoriteBtn}
+          accessibilityRole="togglebutton"
+          accessibilityLabel={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          accessibilityState={{ checked: isFavorite }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={20} color={isFavorite ? '#E11D48' : '#ccc'} />
+        </TouchableOpacity>
+      )}
+
       <Ionicons name="chevron-forward" size={20} color="#767676" style={styles.arrow} accessibilityElementsHidden />
     </TouchableOpacity>
   );
@@ -106,5 +119,13 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   badgeText: { fontSize: 10, fontWeight: '600' },
-  arrow: { marginLeft: 6 },
+  favoriteBtn: {
+    marginLeft: 4,
+    padding: 6,
+    minWidth: 36,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  arrow: { marginLeft: 2 },
 });
