@@ -13,6 +13,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { fetchFoursquareTips, fetchOSMNotesNear } from '../services/bathroomService';
 
+const SOURCE_LABELS = {
+  osm: 'OpenStreetMap',
+  foursquare: 'Foursquare',
+  refuge: 'Refuge',
+  wikidata: 'Wikidata',
+  city: 'City Data',
+};
+
 export default function DetailScreen({ bathroom, onBack }) {
   const [reviews, setReviews]           = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
@@ -67,7 +75,7 @@ export default function DetailScreen({ bathroom, onBack }) {
         <View
           style={styles.heroCard}
           accessible
-          accessibilityLabel={`${bathroom.name}, ${bathroom.distanceLabel} away, rated ${bathroom.rating} out of 5 stars`}
+          accessibilityLabel={`${bathroom.name}, ${bathroom.distanceLabel} away, rated ${bathroom.rating} out of 5 stars${bathroom.ratingDetails?.length > 1 ? `, averaged from ${bathroom.ratingDetails.length} sources` : ''}`}
         >
           {bathroom.image ? (
             <Image source={{ uri: bathroom.image }} style={styles.heroImage} />
@@ -81,6 +89,16 @@ export default function DetailScreen({ bathroom, onBack }) {
             ))}
             <Text style={styles.ratingLabel}>{bathroom.rating} / 5.0</Text>
           </View>
+          {bathroom.ratingDetails?.length > 1 && (
+            <View style={styles.ratingSourcesRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              {bathroom.ratingDetails.map((r, i) => (
+                <View key={i} style={styles.ratingSourceChip}>
+                  <Text style={styles.ratingSourceText}>{SOURCE_LABELS[r.source] ?? r.source}</Text>
+                  <Text style={styles.ratingSourceScore}>{r.rating.toFixed(1)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <Text style={styles.distanceLabel}>{bathroom.distanceLabel} away</Text>
         </View>
 
@@ -249,6 +267,26 @@ const styles = StyleSheet.create({
   starsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 3 },
   ratingLabel: { fontSize: 14, color: '#666', marginLeft: 6 },
   distanceLabel: { fontSize: 14, color: '#7C3AED', fontWeight: '600' },
+  ratingSourcesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  ratingSourceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fef9ec',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#f5e4a0',
+  },
+  ratingSourceText: { fontSize: 10, color: '#78350F', fontWeight: '600' },
+  ratingSourceScore: { fontSize: 10, color: '#B45309', fontWeight: '800' },
   section: {
     backgroundColor: '#fff',
     borderRadius: 14,

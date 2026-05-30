@@ -126,7 +126,7 @@ function parseOverpassElement(el, userLat, userLon) {
     description: tags.description || null,
     distance,
     distanceLabel: formatDistance(distance),
-    rating: computeRating(tags),
+    rating: computeRating({ ...tags, name: tags.name || tags['name:en'] }),
   };
 }
 
@@ -181,6 +181,7 @@ function parseRefugeRestroom(r, userLat, userLon) {
       wheelchair: r.accessible ? 'yes' : 'no',
       changing_table: r.changing_table ? 'yes' : 'no',
       fee: 'no',
+      name: r.name,
     }),
   };
 }
@@ -258,7 +259,7 @@ function parseWikidataBinding(b, userLat, userLon) {
     description: `Wikidata: ${qid}`,
     distance,
     distanceLabel: formatDistance(distance),
-    rating: computeRating({ fee: 'no' }),
+    rating: computeRating({ fee: 'no', name }),
   };
 }
 
@@ -333,6 +334,7 @@ function parseNYCRestroom(r, userLat, userLon) {
       wheelchair: r.accessible === 'Y' ? 'yes' : 'no',
       changing_table: r.baby_changing_station === 'Y' ? 'yes' : 'no',
       fee: 'no',
+      name: r.facilityname || r.name,
     }),
   };
 }
@@ -494,8 +496,8 @@ function cellKey(lat, lon) {
 }
 
 function deduplicateBathrooms(lists) {
+  // _ratings is a temporary accumulator: [{source, rating}]
   const merged = [];
-  // grid maps cellKey → array of indices into merged[]
   const grid = {};
 
   for (const bathroom of lists.flat()) {
@@ -524,20 +526,33 @@ function deduplicateBathrooms(lists) {
     }
 
     if (duplicateIdx === -1) {
+      // First time we've seen this location — seed its ratings list
       const key = cellKey(bathroom.latitude, bathroom.longitude);
       if (!grid[key]) grid[key] = [];
       grid[key].push(merged.length);
-      merged.push(bathroom);
+      merged.push({ ...bathroom, _ratings: [{ source: bathroom.source, rating: bathroom.rating }] });
     } else {
+      // Same physical toilet seen again from a different source.
+      // Keep the higher-priority source's fields but average ALL ratings together.
+      const existing = merged[duplicateIdx];
+      const allRatings = [...existing._ratings, { source: bathroom.source, rating: bathroom.rating }];
+      const avgRating = parseFloat(
+        (allRatings.reduce((s, r) => s + r.rating, 0) / allRatings.length).toFixed(1)
+      );
+
       const incomingPriority = SOURCE_PRIORITY[bathroom.source] ?? 0;
-      const existingPriority = SOURCE_PRIORITY[merged[duplicateIdx].source] ?? 0;
-      if (incomingPriority > existingPriority) {
-        merged[duplicateIdx] = bathroom;
-      }
+      const existingPriority = SOURCE_PRIORITY[existing.source] ?? 0;
+      const base = incomingPriority > existingPriority ? bathroom : existing;
+
+      merged[duplicateIdx] = { ...base, rating: avgRating, _ratings: allRatings };
     }
   }
 
-  return merged;
+  // Expose the per-source breakdown as ratingDetails; drop internal accumulator
+  return merged.map(({ _ratings, ...b }) => ({
+    ...b,
+    ratingDetails: _ratings,
+  }));
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
