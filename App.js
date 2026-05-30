@@ -104,14 +104,21 @@ export default function App() {
 
   const handlePickLocation = useCallback(({ latitude, longitude, name }) => {
     const coords = { latitude, longitude };
+    // Clear immediately so the map doesn't show stale markers at the new location
+    setBathrooms([]);
+    setFromCache(false);
+    setFromMock(false);
     setLocation(coords);
     setLocationName(name);
     setLocationPickerVisible(false);
-    lastFetchedRadiusRef.current = 0; // force fresh fetch at new location
+    lastFetchedRadiusRef.current = 0;
     loadBathrooms(coords, filters.maxDistanceMi * 1609.344);
   }, [loadBathrooms, filters.maxDistanceMi]);
 
   const handleUseGPS = useCallback(() => {
+    setBathrooms([]);
+    setFromCache(false);
+    setFromMock(false);
     setLocationPickerVisible(false);
     setLocationName(null);
     lastFetchedRadiusRef.current = 0;
@@ -146,7 +153,7 @@ export default function App() {
         ? `maps:?q=${label}&ll=${latitude},${longitude}`
         : `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
     Linking.openURL(url);
-  }, [bathrooms]);
+  }, [filteredBathrooms, bathrooms]);
 
   if (locationError) {
     return (
@@ -266,6 +273,7 @@ export default function App() {
                 bathrooms={filteredBathrooms}
                 loading={loading}
                 onSelectBathroom={setSelectedBathroom}
+                radiusMeters={filters.maxDistanceMi * 1609.344}
               />
             </View>
             <View style={[styles.flex, tab !== 'list' && styles.hidden]}>

@@ -1,11 +1,8 @@
-// Web-specific MapScreen.
-// Metro picks this file automatically for web builds; MapScreen.js is used for native.
-
 import { useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// ─── Leaflet loader (singleton so the CDN is only fetched once) ───────────────
+// ─── Leaflet loader (singleton — CDN fetched only once per page load) ──────────
 
 let _leafletPromise = null;
 
@@ -19,10 +16,10 @@ function loadLeaflet() {
     css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
     document.head.appendChild(css);
 
-    const js  = document.createElement('script');
-    js.src    = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    const js = document.createElement('script');
+    js.src   = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     js.onload  = () => resolve(window.L);
-    js.onerror = () => { _leafletPromise = null; reject(); };
+    js.onerror = () => { _leafletPromise = null; reject(new Error('Leaflet failed to load')); };
     document.head.appendChild(js);
   });
   return _leafletPromise;
@@ -39,7 +36,7 @@ function ensureMarkerCSS() {
       display:flex; align-items:center; justify-content:center;
       font-size:20px; cursor:pointer;
       box-shadow:0 2px 8px rgba(0,0,0,.2);
-      transition:transform .15s,background .15s;
+      transition:transform .15s, background .15s;
     }
     .pf-ti.sel { background:#EDE9FE; border-color:#5B21B6; transform:scale(1.25); }
   `;
@@ -48,77 +45,24 @@ function ensureMarkerCSS() {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function MapScreen({ location, bathrooms, loading, onSelectBathroom }) {
-  // Use a stable unique id so we can find the real DOM node via getElementById.
-  // Relying on ref.current for a RN View gives a component instance, not an HTMLElement.
-  const mapId         = useRef(`pf-map-${Math.random().toString(36).slice(2)}`).current;
-  const mapRef        = useRef(null);
-  const layerRef      = useRef(null);
-  const elsRef        = useRef({});
-  const bathroomsRef  = useRef(bathrooms);
-  const onSelectRef   = useRef(onSelectBathroom);
+export default function MapScreen({ location, bathrooms, loading, onSelectBathroom, radiusMeters = 8047 }) {
+  const mapId          = useRef(`pf-map-${Math.random().toString(36).slice(2)}`).current;
+  const mapRef         = useRef(null);
+  const layerRef       = useRef(null);
+  const radiusCircleRef = useRef(null);
+  const elsRef         = useRef({});
+  const bathroomsRef   = useRef(bathrooms);
+  const radiusRef      = useRef(radiusMeters);
+  const onSelectRef    = useRef(onSelectBathroom);
+
+  // Keep refs in sync with latest props so async callbacks always have current values
   bathroomsRef.current = bathrooms;
+  radiusRef.current    = radiusMeters;
   onSelectRef.current  = onSelectBathroom;
 
-  // ── Initialise the Leaflet map ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!location) return;
-    let cancelled = false;
-
-    loadLeaflet().then((L) => {
-      if (cancelled || mapRef.current) return;
-
-      // requestAnimationFrame guarantees the div has been painted and has dimensions
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const container = document.getElementById(mapId);
-        if (!container) return;
-
-        ensureMarkerCSS();
-
-        const map = L.map(container, { zoomControl: false })
-          .setView([location.latitude, location.longitude], 15);
-
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        }).addTo(map);
-
-        L.circle([location.latitude, location.longitude], {
-          radius: 1500, color: '#7C3AED', weight: 1.5,
-          fillColor: '#8B5CF6', fillOpacity: 0.06,
-        }).addTo(map);
-
-        L.circleMarker([location.latitude, location.longitude], {
-          radius: 9, color: '#fff', weight: 3,
-          fillColor: '#4F46E5', fillOpacity: 1,
-        }).addTo(map);
-
-        layerRef.current = L.layerGroup().addTo(map);
-        mapRef.current   = map;
-
-        // Render bathrooms that arrived before the map was ready
-        syncMarkers(L, bathroomsRef.current);
-      });
-    }).catch(() => {});
-
-    return () => {
-      cancelled = true;
-      mapRef.current?.remove();
-      mapRef.current   = null;
-      layerRef.current = null;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location?.latitude, location?.longitude]);
-
-  // ── Keep markers in sync with bathrooms prop ───────────────────────────────
-  useEffect(() => {
-    if (!window.L || !mapRef.current) return;
-    syncMarkers(window.L, bathrooms);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bathrooms]);
-
-  function syncMarkers(L, list) {
+  // ── Stable marker sync — uses only refs, safe to call from any effect ────────
+  const syncMarkers = useCallback((list) => {
+    const L = window.L;
     if (!L || !layerRef.current) return;
     layerRef.current.clearLayers();
     elsRef.current = {};
@@ -137,7 +81,74 @@ export default function MapScreen({ location, bathrooms, loading, onSelectBathro
         onSelectRef.current(b);
       });
     });
-  }
+  }, []); // stable: only touches refs
+
+  // ── Initialise / re-initialise map when location changes ─────────────────────
+  useEffect(() => {
+    if (!location) return;
+    let cancelled = false;
+
+    loadLeaflet().then((L) => {
+      if (cancelled || mapRef.current) return;
+
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const container = document.getElementById(mapId);
+        if (!container) return;
+
+        ensureMarkerCSS();
+
+        const map = L.map(container, { zoomControl: false })
+          .setView([location.latitude, location.longitude], 15);
+
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        }).addTo(map);
+
+        // User position dot
+        L.circleMarker([location.latitude, location.longitude], {
+          radius: 9, color: '#fff', weight: 3,
+          fillColor: '#4F46E5', fillOpacity: 1,
+        }).addTo(map);
+
+        // Search radius circle — read from ref so we always get the current filter value
+        radiusCircleRef.current = L.circle([location.latitude, location.longitude], {
+          radius: radiusRef.current,
+          color: '#7C3AED', weight: 1.5,
+          fillColor: '#8B5CF6', fillOpacity: 0.06,
+        }).addTo(map);
+
+        layerRef.current = L.layerGroup().addTo(map);
+        mapRef.current   = map;
+
+        // Render any bathrooms that arrived before the map was ready
+        syncMarkers(bathroomsRef.current);
+      });
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current    = null;
+        layerRef.current  = null;
+        radiusCircleRef.current = null;
+      }
+    };
+  }, [location?.latitude, location?.longitude, syncMarkers]);
+
+  // ── Update markers when the bathrooms list changes ────────────────────────────
+  useEffect(() => {
+    syncMarkers(bathrooms);
+  }, [bathrooms, syncMarkers]);
+
+  // ── Update the search radius circle when the distance filter changes ──────────
+  useEffect(() => {
+    if (radiusCircleRef.current) {
+      radiusCircleRef.current.setRadius(radiusMeters);
+    }
+  }, [radiusMeters]);
 
   const centerOnUser = useCallback(() => {
     if (mapRef.current && location) {
@@ -156,11 +167,6 @@ export default function MapScreen({ location, bathrooms, loading, onSelectBathro
 
   return (
     <View style={styles.container}>
-      {/*
-        nativeID maps to the HTML id attribute in React Native Web.
-        Using getElementById in the effect is the only reliable way to get
-        a real HTMLElement (View refs return component instances, not DOM nodes).
-      */}
       <View nativeID={mapId} style={styles.map} />
 
       {loading && (

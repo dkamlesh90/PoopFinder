@@ -9,12 +9,12 @@ import {
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 
-// baseUrl gives the page an HTTPS origin so the WebView allows CDN fetches.
-// SRI integrity / crossorigin attributes are intentionally omitted — they
-// require CORS preflight which fails from a WebView's null origin.
+// baseUrl gives the WebView an HTTPS origin so it can load unpkg CDN resources.
+// SRI integrity/crossorigin attributes are intentionally omitted — they fail
+// CORS preflight from a WebView null origin.
 const MAP_BASE_URL = 'https://tile.openstreetmap.org';
 
-function buildMapHTML(lat, lon) {
+function buildMapHTML(lat, lon, radiusMeters) {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -38,15 +38,15 @@ function buildMapHTML(lat, lon) {
 <body>
 <div id="map"></div>
 <script>
-  var map = L.map('map',{zoomControl:false}).setView([${lat},${lon}],15);
+  var map=L.map('map',{zoomControl:false}).setView([${lat},${lon}],15);
 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
-  L.circle([${lat},${lon}],{
-    radius:1500,color:'#7C3AED',weight:1.5,fillColor:'#8B5CF6',fillOpacity:.06
+  var radiusCircle=L.circle([${lat},${lon}],{
+    radius:${radiusMeters},color:'#7C3AED',weight:1.5,fillColor:'#8B5CF6',fillOpacity:.06
   }).addTo(map);
 
   L.circleMarker([${lat},${lon}],{
@@ -59,7 +59,7 @@ function buildMapHTML(lat, lon) {
     layer.clearLayers(); els={};
     list.forEach(function(b){
       var el=document.createElement('div');
-      el.className='ti'; el.textContent='\uD83D\uDEBD';
+      el.className='ti'; el.textContent='🚽';
       els[b.id]=el;
       L.marker([b.latitude,b.longitude],{
         icon:L.divIcon({html:el,className:'',iconSize:[36,36],iconAnchor:[18,36]})
@@ -74,12 +74,14 @@ function buildMapHTML(lat, lon) {
   };
 
   window.centerMap=function(){map.flyTo([${lat},${lon}],15,{duration:.5});};
+  window.updateRadius=function(r){radiusCircle.setRadius(r);};
 
   function onMsg(e){
     try{
       var d=JSON.parse(e.data);
       if(d.type==='BATHROOMS') window.updateBathrooms(d.bathrooms);
       if(d.type==='CENTER')    window.centerMap();
+      if(d.type==='RADIUS')    window.updateRadius(d.radius);
     }catch(err){}
   }
   document.addEventListener('message',onMsg);
@@ -89,16 +91,14 @@ function buildMapHTML(lat, lon) {
 </html>`;
 }
 
-export default function MapScreen({ location, bathrooms, loading, onSelectBathroom }) {
+export default function MapScreen({ location, bathrooms, loading, onSelectBathroom, radiusMeters = 8047 }) {
   const webviewRef = useRef(null);
 
   const mapHtml = useMemo(
-    () => location ? buildMapHTML(location.latitude, location.longitude) : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [location?.latitude, location?.longitude],
+    () => location ? buildMapHTML(location.latitude, location.longitude, radiusMeters) : null,
+    [location?.latitude, location?.longitude, radiusMeters],
   );
 
-  // Inject markers whenever bathrooms update or the map finishes loading
   const injectBathrooms = useCallback(() => {
     if (!webviewRef.current || !bathrooms.length) return;
     const payload = bathrooms.map(({ id, latitude, longitude }) => ({ id, latitude, longitude }));
@@ -121,7 +121,6 @@ export default function MapScreen({ location, bathrooms, loading, onSelectBathro
     webviewRef.current?.injectJavaScript(`window.centerMap();true;`);
   }, []);
 
-  // Re-inject when bathrooms change after the map is already loaded
   useEffect(() => {
     injectBathrooms();
   }, [injectBathrooms]);

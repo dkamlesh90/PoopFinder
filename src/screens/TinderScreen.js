@@ -20,22 +20,42 @@ export default function TinderScreen({ bathrooms, loading }) {
   const [queue, setQueue]           = useState([]);
   const [ratings, setRatings]       = useState({});
   const [showSummary, setShowSummary] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim    = useRef(new Animated.Value(1)).current;
+  const prevIdsRef  = useRef(new Set());
 
   useEffect(() => {
-    async function init() {
-      try {
-        const stored = await AsyncStorage.getItem(RATINGS_KEY);
-        const saved = stored ? JSON.parse(stored) : {};
-        setRatings(saved);
-        const unrated = bathrooms.filter((b) => !saved[b.id]);
-        setQueue(unrated);
-        setShowSummary(unrated.length === 0 && bathrooms.length > 0);
-      } catch {
-        setQueue(bathrooms);
+    if (bathrooms.length === 0) return;
+
+    const newIdSet  = new Set(bathrooms.map((b) => b.id));
+    const prevIdSet = prevIdsRef.current;
+
+    // Determine if this is a brand-new fetch or just a filter narrowing the list.
+    // If fewer than half the old IDs survive in the new set it's a new location/fetch.
+    const survived   = prevIdSet.size > 0
+      ? [...newIdSet].filter((id) => prevIdSet.has(id)).length
+      : 0;
+    const isNewFetch = prevIdSet.size === 0 || survived / prevIdSet.size < 0.5;
+
+    prevIdsRef.current = newIdSet;
+
+    if (isNewFetch) {
+      async function init() {
+        try {
+          const stored = await AsyncStorage.getItem(RATINGS_KEY);
+          const saved  = stored ? JSON.parse(stored) : {};
+          setRatings(saved);
+          const unrated = bathrooms.filter((b) => !saved[b.id]);
+          setQueue(unrated);
+          setShowSummary(unrated.length === 0 && bathrooms.length > 0);
+        } catch {
+          setQueue(bathrooms);
+        }
       }
+      init();
+    } else {
+      // Filter change: drop items no longer in the filtered set without resetting progress
+      setQueue((prev) => prev.filter((b) => newIdSet.has(b.id)));
     }
-    if (bathrooms.length > 0) init();
   }, [bathrooms]);
 
   const saveRating = useCallback(async (bathroom, verdict) => {
