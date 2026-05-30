@@ -1,17 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 
-// ── Configure your ad IDs here ────────────────────────────────────────────────
+// ── Ad IDs ────────────────────────────────────────────────────────────────────
 // Web (Google AdSense): replace with your publisher ID and ad slot
 const ADSENSE_CLIENT = 'ca-pub-XXXXXXXXXXXXXXXX';
 const ADSENSE_SLOT   = 'XXXXXXXXXX';
 
-// Mobile (Google AdMob): replace with your banner unit IDs, then swap the
-// AdBannerNative component below for BannerAd from react-native-google-mobile-ads.
-// Setup: npx expo install react-native-google-mobile-ads  →  eas build
-// const ADMOB_UNIT_ID = Platform.OS === 'ios'
-//   ? 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX'
-//   : 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX';
+// Mobile (Google AdMob): currently using Google's official test IDs.
+// Replace with your real unit IDs from https://admob.google.com before publishing.
+const ADMOB_UNIT_ID = Platform.OS === 'ios'
+  ? 'ca-app-pub-3940256099942544/2934735716'   // iOS test banner
+  : 'ca-app-pub-3940256099942544/6300978111';  // Android test banner
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Web: inject AdSense ins element into a View via nativeID ─────────────────
@@ -51,12 +50,33 @@ function AdBannerWeb() {
   );
 }
 
-// ── Mobile: placeholder until AdMob unit IDs are configured ──────────────────
+// ── Mobile: real AdMob BannerAd ───────────────────────────────────────────────
+let BannerAd, BannerAdSize, TestIds;
+try {
+  const admob  = require('react-native-google-mobile-ads');
+  BannerAd     = admob.BannerAd;
+  BannerAdSize = admob.BannerAdSize;
+  TestIds      = admob.TestIds;
+} catch {}
+
 function AdBannerNative() {
+  if (BannerAd) {
+    return (
+      <View style={styles.nativeWrapper} accessibilityLabel="Advertisement">
+        <Text style={styles.adLabel}>Ad</Text>
+        <BannerAd
+          unitId={ADMOB_UNIT_ID}
+          size={BannerAdSize.BANNER}
+          requestOptions={{ requestNonPersonalizedAdsOnly: false }}
+        />
+      </View>
+    );
+  }
+  // Fallback if the native module isn't linked (e.g. Expo Go)
   return (
     <View style={styles.nativePlaceholder} accessibilityLabel="Advertisement">
       <Text style={styles.adLabel}>Ad</Text>
-      <Text style={styles.nativeText}>Banner ad · configure AdMob unit ID to activate</Text>
+      <Text style={styles.nativeText}>AdMob banner — requires EAS build to display</Text>
     </View>
   );
 }
@@ -88,6 +108,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   webSlot: { width: '100%', minHeight: 90 },
+  nativeWrapper: {
+    marginHorizontal: 16,
+    marginVertical: 6,
+    alignItems: 'center',
+  },
   nativePlaceholder: {
     marginHorizontal: 16,
     marginVertical: 6,
